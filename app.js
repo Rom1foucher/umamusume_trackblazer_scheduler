@@ -1,4 +1,4 @@
-import { initialPayload, solveWithManualLocks, applyPreset, applyCmPreset, CM_PRESETS, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
+import { initialPayload, solveWithManualLocks, applyPreset, applyCmPreset, CM_PRESETS, CM_CALENDAR, cmToBuildTarget, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
 
 let state = {
   settings: null,
@@ -46,6 +46,16 @@ const ids = {
   btHandRight: document.getElementById('btHandRight'),
   btSurfTurf: document.getElementById('btSurfTurf'),
   btSurfDirt: document.getElementById('btSurfDirt'),
+  btSeasonSpring: document.getElementById('btSeasonSpring'),
+  btSeasonSummer: document.getElementById('btSeasonSummer'),
+  btSeasonFall: document.getElementById('btSeasonFall'),
+  btSeasonWinter: document.getElementById('btSeasonWinter'),
+  customCmDistance: document.getElementById('customCmDistance'),
+  customCmLength: document.getElementById('customCmLength'),
+  customCmTrack: document.getElementById('customCmTrack'),
+  customCmSurface: document.getElementById('customCmSurface'),
+  customCmSeason: document.getElementById('customCmSeason'),
+  customCmApply: document.getElementById('customCmApply'),
   forcedClimax: document.getElementById('forcedClimax'),
   includeOpToggle: document.getElementById('includeOpToggle'),
   showProgressToggle: document.getElementById('showProgressToggle'),
@@ -569,13 +579,20 @@ function populateStaticControls(payload) {
   ids.preset.value = initial;
   ids.presetInput.value = '';
   buildPresetDropdown('');
-  // Populate the CM preset dropdown from the static CM_PRESETS map.
+  // Populate the CM preset dropdown from the real CM calendar. Newest first
+  // so an upcoming CM appears near the top. "(none)" clears the overlay,
+  // "Custom CM..." opens the manual form below the dropdown.
   if (ids.cmPreset) {
-    ids.cmPreset.innerHTML = '<option value="">(none)</option>';
-    for (const name of Object.keys(CM_PRESETS)) {
+    ids.cmPreset.innerHTML = '<option value="">(none)</option><option value="custom">Custom CM…</option>';
+    const sep = document.createElement('option');
+    sep.disabled = true; sep.textContent = '──────────';
+    ids.cmPreset.appendChild(sep);
+    // Render in descending CM number so the most recent / upcoming appears at top
+    const sorted = [...CM_CALENDAR].sort((a, b) => (b.cm || 0) - (a.cm || 0));
+    for (const cm of sorted) {
       const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
+      opt.value = cm.id;
+      opt.textContent = `${cm.label} — ${cm.distance} ${cm.length}m, ${cm.track} ${cm.surface}, ${cm.season}`;
       ids.cmPreset.appendChild(opt);
     }
   }
@@ -654,6 +671,12 @@ function settingsFromUI() {
       surface: {
         Turf: Number(ids.btSurfTurf?.value || 0),
         Dirt: Number(ids.btSurfDirt?.value || 0)
+      },
+      season: {
+        Spring: Number(ids.btSeasonSpring?.value || 0),
+        Summer: Number(ids.btSeasonSummer?.value || 0),
+        Fall:   Number(ids.btSeasonFall?.value || 0),
+        Winter: Number(ids.btSeasonWinter?.value || 0)
       }
     },
     forced_epithets: [...state.forced_epithets],
@@ -710,41 +733,71 @@ function loadSettingsToUI(settings) {
   if (ids.btHandRight) ids.btHandRight.value = bth.Right ?? 0;
   if (ids.btSurfTurf) ids.btSurfTurf.value = bts.Turf ?? 0;
   if (ids.btSurfDirt) ids.btSurfDirt.value = bts.Dirt ?? 0;
+  const bse = bt.season || {};
+  if (ids.btSeasonSpring) ids.btSeasonSpring.value = bse.Spring ?? 0;
+  if (ids.btSeasonSummer) ids.btSeasonSummer.value = bse.Summer ?? 0;
+  if (ids.btSeasonFall) ids.btSeasonFall.value = bse.Fall ?? 0;
+  if (ids.btSeasonWinter) ids.btSeasonWinter.value = bse.Winter ?? 0;
   if (settings.forced_epithets) {
     state.forced_epithets = [...settings.forced_epithets];
     renderForcedEpithetList();
   }
 }
 
-// Applies a CM preset overlay to the build-target / max_distance UI fields
-// without touching aptitudes or other character-related settings. Selecting
-// the empty option clears the overlay (resets to zero / unlimited).
-function selectCmPreset(name) {
-  const preset = applyCmPreset(name);
-  if (!preset && name !== '') return;
+// Applies a build-target overlay (from cmToBuildTarget) to the UI fields,
+// without touching aptitudes or other character-related settings. Used both
+// by CM preset selection and the Custom CM form.
+function applyBuildTargetOverlay(preset) {
   if (!preset) {
-    // empty selection: reset overlay
     if (ids.maxDistance) ids.maxDistance.value = '';
     if (ids.hintMatchWeight) ids.hintMatchWeight.value = 0;
-    for (const el of [ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt]) {
+    for (const el of [ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt, ids.btSeasonSpring, ids.btSeasonSummer, ids.btSeasonFall, ids.btSeasonWinter]) {
       if (el) el.value = 0;
     }
-  } else {
-    if (ids.maxDistance) ids.maxDistance.value = preset.max_distance ?? '';
-    if (ids.hintMatchWeight) ids.hintMatchWeight.value = preset.hint_match_weight ?? 0;
-    const btd = preset.build_target?.distance || {};
-    const bth = preset.build_target?.handedness || {};
-    const bts = preset.build_target?.surface || {};
-    if (ids.btDistSprint) ids.btDistSprint.value = btd.Sprint ?? 0;
-    if (ids.btDistMile) ids.btDistMile.value = btd.Mile ?? 0;
-    if (ids.btDistMedium) ids.btDistMedium.value = btd.Medium ?? 0;
-    if (ids.btDistLong) ids.btDistLong.value = btd.Long ?? 0;
-    if (ids.btHandLeft) ids.btHandLeft.value = bth.Left ?? 0;
-    if (ids.btHandRight) ids.btHandRight.value = bth.Right ?? 0;
-    if (ids.btSurfTurf) ids.btSurfTurf.value = bts.Turf ?? 0;
-    if (ids.btSurfDirt) ids.btSurfDirt.value = bts.Dirt ?? 0;
+    queueSolve(0);
+    return;
   }
+  if (ids.maxDistance) ids.maxDistance.value = preset.max_distance ?? '';
+  if (ids.hintMatchWeight) ids.hintMatchWeight.value = preset.hint_match_weight ?? 0;
+  const btd = preset.build_target?.distance || {};
+  const bth = preset.build_target?.handedness || {};
+  const bts = preset.build_target?.surface || {};
+  const bse = preset.build_target?.season || {};
+  if (ids.btDistSprint) ids.btDistSprint.value = btd.Sprint ?? 0;
+  if (ids.btDistMile)   ids.btDistMile.value   = btd.Mile   ?? 0;
+  if (ids.btDistMedium) ids.btDistMedium.value = btd.Medium ?? 0;
+  if (ids.btDistLong)   ids.btDistLong.value   = btd.Long   ?? 0;
+  if (ids.btHandLeft)   ids.btHandLeft.value   = bth.Left   ?? 0;
+  if (ids.btHandRight)  ids.btHandRight.value  = bth.Right  ?? 0;
+  if (ids.btSurfTurf)   ids.btSurfTurf.value   = bts.Turf   ?? 0;
+  if (ids.btSurfDirt)   ids.btSurfDirt.value   = bts.Dirt   ?? 0;
+  if (ids.btSeasonSpring) ids.btSeasonSpring.value = bse.Spring ?? 0;
+  if (ids.btSeasonSummer) ids.btSeasonSummer.value = bse.Summer ?? 0;
+  if (ids.btSeasonFall)   ids.btSeasonFall.value   = bse.Fall   ?? 0;
+  if (ids.btSeasonWinter) ids.btSeasonWinter.value = bse.Winter ?? 0;
   queueSolve(0);
+}
+
+function selectCmPreset(key) {
+  // 'custom' is sentinel — opens the form without overwriting; user clicks Apply.
+  if (key === 'custom' || !key) {
+    if (!key) applyBuildTargetOverlay(null);  // empty selection resets
+    return;
+  }
+  applyBuildTargetOverlay(applyCmPreset(key));
+}
+
+// Reads the Custom CM form, derives build_target via cmToBuildTarget, applies it.
+function applyCustomCm() {
+  const cm = {
+    id: 'custom',
+    distance: ids.customCmDistance?.value || 'Mile',
+    length: Number(ids.customCmLength?.value || 1600),
+    track: ids.customCmTrack?.value || 'Tokyo',
+    surface: ids.customCmSurface?.value || 'Turf',
+    season: ids.customCmSeason?.value || 'Spring'
+  };
+  applyBuildTargetOverlay(cmToBuildTarget(cm));
 }
 
 function currentFreezeLabel() {
@@ -1652,10 +1705,18 @@ function bindAutoSolveListeners() {
   });
 
   // CM preset overlay: when selected, populate the build-target fields.
+  // Selecting "Custom CM…" auto-opens the form below.
   if (ids.cmPreset) {
     ids.cmPreset.addEventListener('change', () => {
-      selectCmPreset(ids.cmPreset.value);
+      const val = ids.cmPreset.value;
+      selectCmPreset(val);
+      const customSection = document.getElementById('customCmSection');
+      if (customSection && val === 'custom') customSection.open = true;
     });
+  }
+  // Custom CM form: derive build_target from the manually-entered conditions.
+  if (ids.customCmApply) {
+    ids.customCmApply.addEventListener('click', () => applyCustomCm());
   }
   // max_distance changes can make races ineligible — same lock-clearing logic
   // as include_op / aptitude changes to avoid orphaned locks.
@@ -1693,7 +1754,7 @@ function bindAutoSolveListeners() {
     ids.showOverDistanceToggle.addEventListener('change', () => queueSolve(0));
   }
 
-  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.fourRacePenalty, ids.raceCost, ids.fanBonus, ids.hintMatchWeight, ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt].forEach(el => {
+  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.fourRacePenalty, ids.raceCost, ids.fanBonus, ids.hintMatchWeight, ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt, ids.btSeasonSpring, ids.btSeasonSummer, ids.btSeasonFall, ids.btSeasonWinter].forEach(el => {
     if (!el) return;
     el.addEventListener('input', () => queueSolve(250));
     el.addEventListener('change', () => queueSolve(0));

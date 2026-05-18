@@ -31,6 +31,29 @@ function trackDirection(race) {
   return null;
 }
 
+// Period-string month parsing. race.period looks like "Late Apr" / "Early Dec".
+const MONTH_ABBR_TO_NUM = {
+  Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
+  Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12
+};
+
+// Maps a race's calendar month to a season label matching in-game seasonal
+// green-skill semantics. Spring covers Mar-May (Tenno Sho Spring, Derby);
+// Summer Jun-Aug (Takarazuka Kinen, summer camps); Fall Sep-Nov (Kikuka Sho,
+// Tenno Sho Autumn, JC); Winter Dec-Feb (Arima Kinen, Champions Cup, dirt).
+function seasonForRace(race) {
+  if (!race || !race.period) return null;
+  for (const [abbr, num] of Object.entries(MONTH_ABBR_TO_NUM)) {
+    if (race.period.indexOf(abbr) !== -1) {
+      if (num >= 3 && num <= 5) return 'Spring';
+      if (num >= 6 && num <= 8) return 'Summer';
+      if (num >= 9 && num <= 11) return 'Fall';
+      return 'Winter';
+    }
+  }
+  return null;
+}
+
 function isStandardDistance(race) {
   return Number.isFinite(race.length) && race.length > 0 && race.length % 400 === 0;
 }
@@ -178,53 +201,78 @@ const PRESETS = {
 // max_distance hard-caps eligible races; build_target weights add a per-race
 // hint-match bonus scaled by hint_match_weight (so the solver favors races whose
 // attributes match the skills you actually care to roll for the CM).
-const CM_PRESETS = {
-  'CM Sprint': {
-    max_distance: 1400,
-    hint_match_weight: 10,
-    build_target: {
-      distance: { Sprint: 1.0, Mile: 0.4, Medium: 0, Long: 0 },
-      handedness: { Left: 0.5, Right: 0.5 },
-      surface: { Turf: 1.0, Dirt: 0 }
-    }
-  },
-  'CM Mile': {
-    max_distance: 1800,
-    hint_match_weight: 10,
-    build_target: {
-      distance: { Sprint: 0.3, Mile: 1.0, Medium: 0.3, Long: 0 },
-      handedness: { Left: 0.5, Right: 0.5 },
-      surface: { Turf: 1.0, Dirt: 0 }
-    }
-  },
-  'CM Medium': {
-    max_distance: 2400,
-    hint_match_weight: 10,
-    build_target: {
-      distance: { Sprint: 0, Mile: 0.3, Medium: 1.0, Long: 0.3 },
-      handedness: { Left: 0.5, Right: 0.5 },
-      surface: { Turf: 1.0, Dirt: 0 }
-    }
-  },
-  'CM Long': {
-    max_distance: 3600,
-    hint_match_weight: 10,
-    build_target: {
-      distance: { Sprint: 0, Mile: 0, Medium: 0.3, Long: 1.0 },
-      handedness: { Left: 0.5, Right: 0.5 },
-      surface: { Turf: 1.0, Dirt: 0 }
-    }
-  },
-  'CM Dirt Mile': {
-    max_distance: 1800,
-    hint_match_weight: 10,
-    build_target: {
-      distance: { Sprint: 0.3, Mile: 1.0, Medium: 0.3, Long: 0 },
-      handedness: { Left: 0.5, Right: 0.5 },
-      surface: { Turf: 0, Dirt: 1.0 }
-    }
+// Champions Meeting calendar — real CMs verified against uma.guide.
+// Each entry holds only the controllable conditions (no weather, no track
+// state, no preferred style — those are random or player choice).
+// season: Spring (Mar-May) / Summer (Jun-Aug) / Fall (Sep-Nov) / Winter (Dec-Feb).
+// Order matches the global server's CM sequence (CM1 = Taurus, Aug 2025).
+const CM_CALENDAR = [
+  { id: 'cm01_taurus',      cm: 1,  label: 'CM1 — Taurus Cup',          distance: 'Medium', length: 2400, track: 'Tokyo',    surface: 'Turf', season: 'Spring' },
+  { id: 'cm02_gemini',      cm: 2,  label: 'CM2 — Gemini Cup',          distance: 'Long',   length: 3200, track: 'Kyoto',    surface: 'Turf', season: 'Spring' },
+  { id: 'cm03_cancer',      cm: 3,  label: 'CM3 — Cancer Cup',          distance: 'Mile',   length: 1600, track: 'Tokyo',    surface: 'Turf', season: 'Spring' },
+  { id: 'cm04_leo',         cm: 4,  label: 'CM4 — Leo Cup',             distance: 'Medium', length: 2200, track: 'Hanshin',  surface: 'Turf', season: 'Summer' },
+  { id: 'cm05_virgo',       cm: 5,  label: 'CM5 — Virgo Cup',           distance: 'Mile',   length: 1600, track: 'Hanshin',  surface: 'Turf', season: 'Fall' },
+  { id: 'cm06_libra',       cm: 6,  label: 'CM6 — Libra Cup',           distance: 'Long',   length: 3000, track: 'Kyoto',    surface: 'Turf', season: 'Fall' },
+  { id: 'cm07_scorpio',     cm: 7,  label: 'CM7 — Scorpio Cup',         distance: 'Medium', length: 2000, track: 'Tokyo',    surface: 'Turf', season: 'Fall' },
+  { id: 'cm08_sagittarius', cm: 8,  label: 'CM8 — Sagittarius Cup',     distance: 'Long',   length: 2500, track: 'Nakayama', surface: 'Turf', season: 'Winter' },
+  { id: 'cm09_capricorn',   cm: 9,  label: 'CM9 — Capricorn Cup',       distance: 'Sprint', length: 1200, track: 'Chukyo',   surface: 'Turf', season: 'Winter' },
+  { id: 'cm10_aquarius',    cm: 10, label: 'CM10 — Aquarius Cup',       distance: 'Mile',   length: 1600, track: 'Tokyo',    surface: 'Dirt', season: 'Winter' },
+  { id: 'cm11_pisces',      cm: 11, label: 'CM11 — Pisces Cup',         distance: 'Long',   length: 3200, track: 'Hanshin',  surface: 'Turf', season: 'Spring' },
+  { id: 'cm12_aries',       cm: 12, label: 'CM12 — Aries Cup',          distance: 'Medium', length: 2000, track: 'Nakayama', surface: 'Turf', season: 'Spring' },
+  { id: 'cm13_taurus_2',    cm: 13, label: 'CM13 — Taurus Cup (2)',     distance: 'Medium', length: 2400, track: 'Tokyo',    surface: 'Turf', season: 'Spring' },
+  { id: 'cm14_gemini_2',    cm: 14, label: 'CM14 — Gemini Cup (2)',     distance: 'Mile',   length: 1600, track: 'Tokyo',    surface: 'Turf', season: 'Spring' },
+  { id: 'cm15_cancer_2',    cm: 15, label: 'CM15 — Cancer Cup (2)',     distance: 'Medium', length: 2200, track: 'Hanshin',  surface: 'Turf', season: 'Summer' }
+];
+
+// Maps a CM definition to a build_target weights vector + max_distance.
+// Distance: exact = 1.0, adjacent class = 0.3, far = 0.
+// Surface: target = 1.0, other = 0.
+// Handedness: derived from the CM's track via trackDirection (1.0 / 0).
+// Season: target = 0.5 (Spring/Summer/Fall/Winter green skills are a softer
+// signal than distance match, so weighted lower by default; user can tune).
+function cmToBuildTarget(cm) {
+  if (!cm) return null;
+  const distanceOrder = ['Sprint', 'Mile', 'Medium', 'Long'];
+  const targetIdx = distanceOrder.indexOf(cm.distance);
+  const dist = {};
+  for (let i = 0; i < distanceOrder.length; i += 1) {
+    if (targetIdx < 0) { dist[distanceOrder[i]] = 0; continue; }
+    const d = Math.abs(i - targetIdx);
+    dist[distanceOrder[i]] = d === 0 ? 1.0 : (d === 1 ? 0.3 : 0);
   }
-};
+  const dir = trackDirection({ track: cm.track, length: cm.length });
+  const hand = {
+    Left: dir === 'Left' ? 1.0 : 0,
+    Right: dir === 'Right' ? 1.0 : 0
+  };
+  const surf = {
+    Turf: cm.surface === 'Turf' ? 1.0 : 0,
+    Dirt: cm.surface === 'Dirt' ? 1.0 : 0
+  };
+  const season = {
+    Spring: cm.season === 'Spring' ? 0.5 : 0,
+    Summer: cm.season === 'Summer' ? 0.5 : 0,
+    Fall: cm.season === 'Fall' ? 0.5 : 0,
+    Winter: cm.season === 'Winter' ? 0.5 : 0
+  };
+  // max_distance heuristic by category: aggressive cap for Sprint/Mile to
+  // avoid trap epithets; permissive for Medium; unlimited for Long since
+  // the player explicitly needs 2500m+ races.
+  const maxDist = cm.distance === 'Sprint' ? Math.max(1600, cm.length + 400)
+                : cm.distance === 'Mile'   ? Math.max(2000, cm.length + 400)
+                : cm.distance === 'Medium' ? Math.max(2600, cm.length + 200)
+                : 0;
+  return {
+    cm_id: cm.id,
+    max_distance: maxDist,
+    hint_match_weight: 10,
+    build_target: { distance: dist, handedness: hand, surface: surf, season }
+  };
+}
+
+// Legacy alias preserved for backward compat with existing share-state hashes.
+const CM_PRESETS = {};
+for (const cm of CM_CALENDAR) CM_PRESETS[cm.label] = cmToBuildTarget(cm);
 
 // Default summer training blocks (no-race turns).
 // Junior: Early Jul → Early Aug; Classic & Senior: Early Jul → Late Aug.
@@ -319,7 +367,8 @@ function defaultSettings() {
     build_target: {
       distance: { Sprint: 0, Mile: 0, Medium: 0, Long: 0 },
       handedness: { Left: 0, Right: 0 },
-      surface: { Turf: 0, Dirt: 0 }
+      surface: { Turf: 0, Dirt: 0 },
+      season: { Spring: 0, Summer: 0, Fall: 0, Winter: 0 }
     },
     forced_epithets: [],
     forced_climax: '',
@@ -335,11 +384,16 @@ function applyPreset(presetName) {
 }
 
 // Returns an overlay of settings fields produced by the named CM preset.
-// Caller is expected to merge these onto the existing settings.
-function applyCmPreset(presetName) {
-  const preset = CM_PRESETS[presetName];
-  if (!preset) return null;
-  return clone(preset);
+// Accepts either a CM id ('cm14_gemini_2') or a legacy label ('CM Mile') for
+// backward compatibility with older saved schedules. Caller merges these onto
+// the existing settings.
+function applyCmPreset(presetKey) {
+  if (!presetKey) return null;
+  const cm = CM_CALENDAR.find(c => c.id === presetKey || c.label === presetKey);
+  if (cm) return clone(cmToBuildTarget(cm));
+  // Legacy fallback (older share links / saved state)
+  if (CM_PRESETS[presetKey]) return clone(CM_PRESETS[presetKey]);
+  return null;
 }
 
 function normalizeSettings(settings = null) {
@@ -354,7 +408,8 @@ function normalizeSettings(settings = null) {
       s.build_target = {
         distance: { ...defaults.distance, ...(settings.build_target.distance || {}) },
         handedness: { ...defaults.handedness, ...(settings.build_target.handedness || {}) },
-        surface: { ...defaults.surface, ...(settings.build_target.surface || {}) }
+        surface: { ...defaults.surface, ...(settings.build_target.surface || {}) },
+        season: { ...defaults.season, ...(settings.build_target.season || {}) }
       };
     }
   }
@@ -363,7 +418,7 @@ function normalizeSettings(settings = null) {
   }
   s.max_consecutive_races = Number(s.max_consecutive_races ?? 0);
   // Coerce build_target weights to numbers
-  for (const axis of ['distance', 'handedness', 'surface']) {
+  for (const axis of ['distance', 'handedness', 'surface', 'season']) {
     for (const key of Object.keys(s.build_target[axis])) {
       s.build_target[axis][key] = Number(s.build_target[axis][key] ?? 0);
     }
@@ -414,6 +469,10 @@ function computeBuildTargetBonus(race, settings) {
   if (bt.handedness) {
     const dir = trackDirection(race);
     if (dir && bt.handedness[dir]) sum += bt.handedness[dir];
+  }
+  if (bt.season) {
+    const season = seasonForRace(race);
+    if (season && bt.season[season]) sum += bt.season[season];
   }
   return settings.hint_match_weight * sum;
 }
@@ -1561,4 +1620,4 @@ export async function getAllEpithetNames() {
   return data.epithets.map(e => ({ name: e.name, reward_text: e.reward_text, condition_text: e.condition_text }));
 }
 
-export { NO_RACE, AUTO, applyPreset, applyCmPreset, CM_PRESETS, DEFAULT_SUMMER_BLOCKS, BASE_REWARD, epithetRacePredicates };
+export { NO_RACE, AUTO, applyPreset, applyCmPreset, CM_PRESETS, CM_CALENDAR, cmToBuildTarget, DEFAULT_SUMMER_BLOCKS, BASE_REWARD, epithetRacePredicates };

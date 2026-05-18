@@ -42,8 +42,59 @@
       <div class="form-group">
         <label class="label" for="cmPreset">CM target preset</label>
         <select id="cmPreset"></select>
-        <div class="helper" style="margin-top:4px;">Champions Meeting profile. Sets max distance and build-target weights below. Independent of character preset.</div>
+        <div class="helper" style="margin-top:4px;">Real Champions Meetings from the global calendar. Selecting one auto-fills the build-target weights below based on its controllable conditions (distance, surface, handedness, season). Style, weather, and track state are not included — those are random or player choice.</div>
       </div>
+
+      <details class="advanced" id="customCmSection" style="margin-top:6px;">
+        <summary>Custom CM</summary>
+        <div class="helper" style="margin-top:4px;margin-bottom:6px;">Define a CM not in the calendar (e.g. unannounced upcoming CM, or a hypothetical target). Click "Apply" to derive build-target weights from these conditions.</div>
+        <div class="row-2">
+          <div><label class="label" for="customCmDistance">Distance</label>
+            <select id="customCmDistance">
+              <option value="Sprint">Sprint</option>
+              <option value="Mile" selected>Mile</option>
+              <option value="Medium">Medium</option>
+              <option value="Long">Long</option>
+            </select>
+          </div>
+          <div><label class="label" for="customCmLength">Length (m)</label>
+            <input id="customCmLength" type="number" step="100" value="1600">
+          </div>
+        </div>
+        <div class="row-2">
+          <div><label class="label" for="customCmTrack">Track</label>
+            <select id="customCmTrack">
+              <option value="Tokyo">Tokyo</option>
+              <option value="Nakayama">Nakayama</option>
+              <option value="Hanshin">Hanshin</option>
+              <option value="Kyoto">Kyoto</option>
+              <option value="Chukyo">Chukyo</option>
+              <option value="Niigata">Niigata</option>
+              <option value="Sapporo">Sapporo</option>
+              <option value="Hakodate">Hakodate</option>
+              <option value="Fukushima">Fukushima</option>
+              <option value="Kokura">Kokura</option>
+              <option value="Ooi">Ooi</option>
+            </select>
+          </div>
+          <div><label class="label" for="customCmSurface">Surface</label>
+            <select id="customCmSurface">
+              <option value="Turf" selected>Turf</option>
+              <option value="Dirt">Dirt</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:6px;">
+          <label class="label" for="customCmSeason">Season</label>
+          <select id="customCmSeason">
+            <option value="Spring" selected>Spring (Mar–May)</option>
+            <option value="Summer">Summer (Jun–Aug)</option>
+            <option value="Fall">Fall (Sep–Nov)</option>
+            <option value="Winter">Winter (Dec–Feb)</option>
+          </select>
+        </div>
+        <button type="button" id="customCmApply" class="button secondary" style="margin-top:6px;width:100%;">Apply custom CM</button>
+      </details>
 
       <div class="form-group">
         <div class="label">Distance aptitudes</div>
@@ -137,6 +188,16 @@
             <div><label class="label" for="btSurfTurf">Turf</label><input id="btSurfTurf" type="number" step="0.1" min="0" max="1"></div>
             <div><label class="label" for="btSurfDirt">Dirt</label><input id="btSurfDirt" type="number" step="0.1" min="0" max="1"></div>
           </div>
+        </div>
+        <div class="form-group">
+          <div class="label">Season preference</div>
+          <div class="row-2">
+            <div><label class="label" for="btSeasonSpring">Spring</label><input id="btSeasonSpring" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btSeasonSummer">Summer</label><input id="btSeasonSummer" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btSeasonFall">Fall</label><input id="btSeasonFall" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btSeasonWinter">Winter</label><input id="btSeasonWinter" type="number" step="0.1" min="0" max="1"></div>
+          </div>
+          <div class="helper" style="margin-top:4px;">Spring: Mar–May. Summer: Jun–Aug. Fall: Sep–Nov. Winter: Dec–Feb. Matches in-game seasonal green-skill semantics (Spring Runner, etc.).</div>
         </div>
       </details>
 

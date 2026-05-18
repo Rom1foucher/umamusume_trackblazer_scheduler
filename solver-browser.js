@@ -16,6 +16,21 @@ const TOHOKU_TRACKS = new Set(['Fukushima', 'Niigata']);
 const HOKKAIDO_TRACKS = new Set(['Sapporo', 'Hakodate']);
 const KOKURA_TRACKS = new Set(['Kokura']);
 
+// Direction of travel on each track's main oval course.
+// Niigata's 1000m races are run on the straight course, handled below.
+const LEFT_TRACKS = new Set(['Tokyo', 'Chukyo', 'Niigata']);
+const RIGHT_TRACKS = new Set(['Nakayama', 'Hanshin', 'Kyoto', 'Sapporo', 'Hakodate', 'Fukushima', 'Kokura', 'Ooi', 'Oi']);
+
+// Returns 'Left', 'Right', 'Straight', or null. The straight course at Niigata
+// is only used for 1000m sprints; everything else at Niigata is left-turning.
+function trackDirection(race) {
+  if (!race || !race.track) return null;
+  if (race.track === 'Niigata' && Number(race.length) === 1000) return 'Straight';
+  if (LEFT_TRACKS.has(race.track)) return 'Left';
+  if (RIGHT_TRACKS.has(race.track)) return 'Right';
+  return null;
+}
+
 function isStandardDistance(race) {
   return Number.isFinite(race.length) && race.length > 0 && race.length % 400 === 0;
 }
@@ -158,6 +173,59 @@ const PRESETS = {
   'Almond Eye': { Sprint: 'G', Mile: 'A', Medium: 'A', Long: 'F', Turf: 'A', Dirt: 'G' },
 };
 
+// Build-target presets: overlay settings tuned for a downstream Champions Meeting
+// category. These are orthogonal to character (aptitude) presets — apply both.
+// max_distance hard-caps eligible races; build_target weights add a per-race
+// hint-match bonus scaled by hint_match_weight (so the solver favors races whose
+// attributes match the skills you actually care to roll for the CM).
+const CM_PRESETS = {
+  'CM Sprint': {
+    max_distance: 1400,
+    hint_match_weight: 10,
+    build_target: {
+      distance: { Sprint: 1.0, Mile: 0.4, Medium: 0, Long: 0 },
+      handedness: { Left: 0.5, Right: 0.5 },
+      surface: { Turf: 1.0, Dirt: 0 }
+    }
+  },
+  'CM Mile': {
+    max_distance: 1800,
+    hint_match_weight: 10,
+    build_target: {
+      distance: { Sprint: 0.3, Mile: 1.0, Medium: 0.3, Long: 0 },
+      handedness: { Left: 0.5, Right: 0.5 },
+      surface: { Turf: 1.0, Dirt: 0 }
+    }
+  },
+  'CM Medium': {
+    max_distance: 2400,
+    hint_match_weight: 10,
+    build_target: {
+      distance: { Sprint: 0, Mile: 0.3, Medium: 1.0, Long: 0.3 },
+      handedness: { Left: 0.5, Right: 0.5 },
+      surface: { Turf: 1.0, Dirt: 0 }
+    }
+  },
+  'CM Long': {
+    max_distance: 3600,
+    hint_match_weight: 10,
+    build_target: {
+      distance: { Sprint: 0, Mile: 0, Medium: 0.3, Long: 1.0 },
+      handedness: { Left: 0.5, Right: 0.5 },
+      surface: { Turf: 1.0, Dirt: 0 }
+    }
+  },
+  'CM Dirt Mile': {
+    max_distance: 1800,
+    hint_match_weight: 10,
+    build_target: {
+      distance: { Sprint: 0.3, Mile: 1.0, Medium: 0.3, Long: 0 },
+      handedness: { Left: 0.5, Right: 0.5 },
+      surface: { Turf: 0, Dirt: 1.0 }
+    }
+  }
+};
+
 // Default summer training blocks (no-race turns).
 // Junior: Early Jul → Early Aug; Classic & Senior: Early Jul → Late Aug.
 const DEFAULT_SUMMER_BLOCKS = [
@@ -233,6 +301,7 @@ function debutRaceFor(settings, data) {
 function defaultSettings() {
   return {
     preset: '',
+    cm_preset: '',
     aptitudes: { Sprint: 'A', Mile: 'A', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' },
     threshold: 'C',
     race_bonus_pct: 50.0,
@@ -241,9 +310,17 @@ function defaultSettings() {
     hint_weight: 8.0,
     epithet_multiplier: 1.0,
     three_race_penalty_weight: 3.0,
+    four_race_penalty_weight: 0.0,
     max_consecutive_races: 0,
     race_cost: 100,
     fan_bonus_pct: 0,
+    max_distance: 0,
+    hint_match_weight: 0,
+    build_target: {
+      distance: { Sprint: 0, Mile: 0, Medium: 0, Long: 0 },
+      handedness: { Left: 0, Right: 0 },
+      surface: { Turf: 0, Dirt: 0 }
+    },
     forced_epithets: [],
     forced_climax: '',
     include_op: false
@@ -254,6 +331,14 @@ function applyPreset(presetName) {
   return clone(PRESETS[presetName] || { Sprint: 'A', Mile: 'A', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' });
 }
 
+// Returns an overlay of settings fields produced by the named CM preset.
+// Caller is expected to merge these onto the existing settings.
+function applyCmPreset(presetName) {
+  const preset = CM_PRESETS[presetName];
+  if (!preset) return null;
+  return clone(preset);
+}
+
 function normalizeSettings(settings = null) {
   const s = defaultSettings();
   if (settings) {
@@ -261,11 +346,25 @@ function normalizeSettings(settings = null) {
     if (settings.aptitudes) {
       s.aptitudes = { ...s.aptitudes, ...settings.aptitudes };
     }
+    if (settings.build_target) {
+      const defaults = defaultSettings().build_target;
+      s.build_target = {
+        distance: { ...defaults.distance, ...(settings.build_target.distance || {}) },
+        handedness: { ...defaults.handedness, ...(settings.build_target.handedness || {}) },
+        surface: { ...defaults.surface, ...(settings.build_target.surface || {}) }
+      };
+    }
   }
-  for (const key of ['race_bonus_pct', 'stat_weight', 'sp_weight', 'hint_weight', 'epithet_multiplier', 'three_race_penalty_weight', 'race_cost', 'fan_bonus_pct']) {
+  for (const key of ['race_bonus_pct', 'stat_weight', 'sp_weight', 'hint_weight', 'epithet_multiplier', 'three_race_penalty_weight', 'four_race_penalty_weight', 'race_cost', 'fan_bonus_pct', 'max_distance', 'hint_match_weight']) {
     s[key] = Number(s[key] ?? 0);
   }
   s.max_consecutive_races = Number(s.max_consecutive_races ?? 0);
+  // Coerce build_target weights to numbers
+  for (const axis of ['distance', 'handedness', 'surface']) {
+    for (const key of Object.keys(s.build_target[axis])) {
+      s.build_target[axis][key] = Number(s.build_target[axis][key] ?? 0);
+    }
+  }
   return s;
 }
 
@@ -273,6 +372,7 @@ const OP_GRADES = new Set(['OP', 'Pre-OP']);
 
 function raceIsEligible(race, settings) {
   if (OP_GRADES.has(race.grade) && !settings.include_op) return false;
+  if (settings.max_distance > 0 && Number(race.length) > settings.max_distance) return false;
   const threshold = RANK_VALUE[settings.threshold];
   const apt = settings.aptitudes;
   return RANK_VALUE[apt[race.distance]] >= threshold && RANK_VALUE[apt[race.surface]] >= threshold;
@@ -294,10 +394,32 @@ function g2g3Baseline(settings) {
   return settings.stat_weight * Math.floor(base.stats * (1 + rb)) + settings.sp_weight * Math.floor(base.sp * (1 + rb));
 }
 
+// Returns the expected-value bonus added to a race's objective coefficient
+// based on how well its attributes (distance, track direction, surface) match
+// the user's build_target. Scaled by hint_match_weight; zero when disabled.
+function computeBuildTargetBonus(race, settings) {
+  if (!settings.hint_match_weight || settings.hint_match_weight <= 0) return 0;
+  const bt = settings.build_target;
+  if (!bt) return 0;
+  let sum = 0;
+  if (bt.distance && race.distance && bt.distance[race.distance]) {
+    sum += bt.distance[race.distance];
+  }
+  if (bt.surface && race.surface && bt.surface[race.surface]) {
+    sum += bt.surface[race.surface];
+  }
+  if (bt.handedness) {
+    const dir = trackDirection(race);
+    if (dir && bt.handedness[dir]) sum += bt.handedness[dir];
+  }
+  return settings.hint_match_weight * sum;
+}
+
 function weightedRaceValue(race, settings) {
   const { stats, sp } = raceReward(race, settings.race_bonus_pct);
   const cost = Number(settings.race_cost || 0) / 100.0 * g2g3Baseline(settings);
-  return { stats, sp, value: settings.stat_weight * stats + settings.sp_weight * sp - cost };
+  const buildBonus = computeBuildTargetBonus(race, settings);
+  return { stats, sp, value: settings.stat_weight * stats + settings.sp_weight * sp + buildBonus - cost };
 }
 
 function epithetStatTotal(epithetName, data) {
@@ -640,6 +762,15 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   for (let start = 0; start < Math.max(0, actionsByWindow.length - 2); start += 1) {
     zVars.push(`z_${start}`);
   }
+  // wVars: 4-in-a-row indicator at positions (start, start+1, start+2, start+3).
+  // Active only when four_race_penalty_weight > 0 to keep the model lean by default.
+  const addQuadPenalty = settings.four_race_penalty_weight > 0;
+  const wVars = [];
+  if (addQuadPenalty) {
+    for (let start = 0; start < Math.max(0, actionsByWindow.length - 3); start += 1) {
+      wVars.push(`w_${start}`);
+    }
+  }
 
   // Summer training penalty: racing during summer camp costs heavily because
   // summer is the primary training window in a career. Scale off the G2/G3
@@ -674,6 +805,14 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     const coef = LATE_DEC_WINDOWS.has(thirdWindow) ? 0 : -settings.three_race_penalty_weight;
     objectiveVars.push({ name: zVars[idx], coef });
   }
+  // Quadruplet (4-in-a-row) penalty: applied INCREMENTALLY on top of the
+  // 3-race triplet penalty already counted by z_var. Waived when the 4th
+  // race lands on Late Dec (last of year, no conditioning in game).
+  for (let idx = 0; idx < wVars.length; idx += 1) {
+    const fourthWindow = idx + 3;
+    const coef = LATE_DEC_WINDOWS.has(fourthWindow) ? 0 : -settings.four_race_penalty_weight;
+    objectiveVars.push({ name: wVars[idx], coef });
+  }
 
   const model = {
     name: 'TrackblazerPlanner',
@@ -684,7 +823,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     },
     subjectTo: [],
     bounds: [],
-    binaries: [...xVars, ...yVars, ...zVars]
+    binaries: [...xVars, ...yVars, ...zVars, ...wVars]
   };
 
   const varsForWindow = i => actionsByWindow[i].map((_, j) => `x_${i}_${j}`);
@@ -782,6 +921,24 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
       for (const name of raceVarsByWindow[i]) coeffs.push([name, 1]);
     }
     addConstraint(model, glpk, `z_full_${start}`, coeffs, glpk.GLP_UP, 0, 2);
+  }
+
+  // Sliding four-race windows for the quadruplet penalty.
+  // w_idx = 1 iff races run at positions (idx, idx+1, idx+2, idx+3) inclusive.
+  // Since w_var has a negative objective coefficient, only the upper bound
+  // (w cannot exceed the minimum of the four indicators) is strictly needed.
+  // We also encode the lower bound for safety / future-proofing.
+  for (let start = 0; start < wVars.length; start += 1) {
+    const wName = `w_${start}`;
+    for (let i = start; i < start + 4; i += 1) {
+      const coeffs = [[wName, 1], ...raceVarsByWindow[i].map(name => [name, -1])];
+      addConstraint(model, glpk, `w_link_${start}_${i}`, coeffs, glpk.GLP_UP, 0, 0);
+    }
+    const coeffs = [[wName, -1]];
+    for (let i = start; i < start + 4; i += 1) {
+      for (const name of raceVarsByWindow[i]) coeffs.push([name, 1]);
+    }
+    addConstraint(model, glpk, `w_full_${start}`, coeffs, glpk.GLP_UP, 0, 3);
   }
 
   // Fixed manual or historical choices.
@@ -1042,6 +1199,15 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
       const merged = new Set([...(row.epithet_names || []), ...full]);
       row.epithet_names = [...merged];
     }
+    // is_skippable: race contributes to at least one earned epithet but isn't
+    // uniquely required for any (e.g. duplicate Yasuda Kinen across years, or
+    // surplus picks for "X of Y" epithets). Removing it would lose 0 epithets.
+    row.is_skippable = Boolean(
+      row.selected !== NO_RACE &&
+      !row.lost &&
+      (row.epithet_names || []).length > 0 &&
+      (row.linked_epithets || []).length === 0
+    );
   }
 
   for (const [windowIndexRaw, choiceName] of Object.entries(fixed)) {
@@ -1076,7 +1242,12 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     return sum + ((solutionVars[zName] || 0) > 0.5 ? 1 : 0);
   }, 0);
   const triplePenaltyTotal = settings.three_race_penalty_weight * triplePenaltyCount;
-  const totalValue = weightedRaceValueNet + weightedEpithetValueTotal - triplePenaltyTotal;
+  const quadPenaltyCount = wVars.reduce((sum, wName, idx) => {
+    if (LATE_DEC_WINDOWS.has(idx + 3)) return sum;
+    return sum + ((solutionVars[wName] || 0) > 0.5 ? 1 : 0);
+  }, 0);
+  const quadPenaltyTotal = settings.four_race_penalty_weight * quadPenaltyCount;
+  const totalValue = weightedRaceValueNet + weightedEpithetValueTotal - triplePenaltyTotal - quadPenaltyTotal;
 
   return {
     status,
@@ -1093,6 +1264,8 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     summer_penalty_total: Number(summerPenaltyTotal.toFixed(2)),
     triple_penalty_count: triplePenaltyCount,
     triple_penalty_total: Number(triplePenaltyTotal.toFixed(2)),
+    quad_penalty_count: quadPenaltyCount,
+    quad_penalty_total: Number(quadPenaltyTotal.toFixed(2)),
     total_race_stats: totalRaceStats,
     total_race_sp: totalRaceSp,
     total_race_fans: totalRaceFans,
@@ -1230,6 +1403,8 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
       summer_penalty_total: result.summer_penalty_total || 0,
       triple_penalty_count: result.triple_penalty_count || 0,
       triple_penalty_total: result.triple_penalty_total || 0,
+      quad_penalty_count: result.quad_penalty_count || 0,
+      quad_penalty_total: result.quad_penalty_total || 0,
       race_stats: result.total_race_stats || 0,
       race_skill_points: result.total_race_sp || 0,
       race_fans: result.total_race_fans || 0,
@@ -1262,4 +1437,4 @@ export async function getAllEpithetNames() {
   return data.epithets.map(e => ({ name: e.name, reward_text: e.reward_text, condition_text: e.condition_text }));
 }
 
-export { NO_RACE, AUTO, applyPreset, DEFAULT_SUMMER_BLOCKS, BASE_REWARD, epithetRacePredicates };
+export { NO_RACE, AUTO, applyPreset, applyCmPreset, CM_PRESETS, DEFAULT_SUMMER_BLOCKS, BASE_REWARD, epithetRacePredicates };

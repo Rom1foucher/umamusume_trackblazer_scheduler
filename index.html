@@ -40,6 +40,12 @@
       </div>
 
       <div class="form-group">
+        <label class="label" for="cmPreset">CM target preset</label>
+        <select id="cmPreset"></select>
+        <div class="helper" style="margin-top:4px;">Champions Meeting profile. Sets max distance and build-target weights below. Independent of character preset.</div>
+      </div>
+
+      <div class="form-group">
         <div class="label">Distance aptitudes</div>
         <div class="row-2">
           <div><label class="label" for="sprint">Sprint</label><select id="sprint"></select></div>
@@ -75,6 +81,46 @@
         <input id="maxConsec" type="number" min="0" step="1" placeholder="No limit">
         <div class="helper" style="margin-top:4px;">Hard cap on consecutive races. Leave empty or 0 for no limit.</div>
       </div>
+
+      <div class="form-group">
+        <label class="label" for="maxDistance">Max race distance (m)</label>
+        <input id="maxDistance" type="number" min="0" step="100" placeholder="No limit">
+        <div class="helper" style="margin-top:4px;">Hard cap on race length. Excludes any race longer than this — useful to avoid stayer epithets (Spring Senior, etc.) when training for a Mile or Sprint CM. Leave empty for no limit.</div>
+      </div>
+
+      <details class="advanced" id="buildTargetSection">
+        <summary>Build target (hint match)</summary>
+        <div class="helper" style="margin-top:4px;margin-bottom:8px;">Per-race expected-value bonus when race attributes match the skills you want to roll for your CM build. Zero weight on an attribute means "neutral".</div>
+        <div class="form-group">
+          <label class="label" for="hintMatchWeight">Hint match weight</label>
+          <input id="hintMatchWeight" type="number" step="0.5" min="0">
+          <div class="helper" style="margin-top:4px;">Global multiplier. 0 disables the bonus entirely. Sensible range: 5–15.</div>
+        </div>
+        <div class="form-group">
+          <div class="label">Distance preference</div>
+          <div class="row-2">
+            <div><label class="label" for="btDistSprint">Sprint</label><input id="btDistSprint" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btDistMile">Mile</label><input id="btDistMile" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btDistMedium">Medium</label><input id="btDistMedium" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btDistLong">Long</label><input id="btDistLong" type="number" step="0.1" min="0" max="1"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="label">Handedness preference</div>
+          <div class="row-2">
+            <div><label class="label" for="btHandLeft">Left</label><input id="btHandLeft" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btHandRight">Right</label><input id="btHandRight" type="number" step="0.1" min="0" max="1"></div>
+          </div>
+          <div class="helper" style="margin-top:4px;">Left: Tokyo, Chukyo, Niigata. Right: Nakayama, Hanshin, Kyoto, Sapporo, Hakodate, Fukushima, Kokura, Ooi.</div>
+        </div>
+        <div class="form-group">
+          <div class="label">Surface preference</div>
+          <div class="row-2">
+            <div><label class="label" for="btSurfTurf">Turf</label><input id="btSurfTurf" type="number" step="0.1" min="0" max="1"></div>
+            <div><label class="label" for="btSurfDirt">Dirt</label><input id="btSurfDirt" type="number" step="0.1" min="0" max="1"></div>
+          </div>
+        </div>
+      </details>
 
       <div class="form-group">
         <label class="label" for="fanBonus">Deck Fan Bonus %</label>
@@ -132,6 +178,10 @@
             <input id="threeRacePenalty" type="number" step="0.1">
           </div>
           <div class="form-group">
+            <label class="label" for="fourRacePenalty">4-race pen</label>
+            <input id="fourRacePenalty" type="number" step="0.1">
+          </div>
+          <div class="form-group">
             <label class="label" for="raceCost">Race cost %</label>
             <input id="raceCost" type="number" step="5">
           </div>
@@ -141,7 +191,8 @@
           <div><strong>SP wt</strong> = value per skill point</div>
           <div><strong>Hint wt</strong> = value for +1 hint epithet</div>
           <div><strong>Epithet mult</strong> = multiplier for epithet rewards</div>
-          <div><strong>3-race pen</strong> = penalty per 3 consecutive races</div>
+          <div><strong>3-race pen</strong> = penalty per 3-in-a-row triplet (waived when 3rd race is Late Dec)</div>
+          <div><strong>4-race pen</strong> = extra penalty per 4-in-a-row quadruplet, on top of 3-race pen. 0 disables. Models the heavier in-game 4th-race conditioning hit.</div>
           <div><strong>Race cost %</strong> = opportunity cost per race as % of G2/G3 value (100 = only race for epithets)</div>
         </div>
       </details>

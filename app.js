@@ -1,4 +1,4 @@
-import { initialPayload, solveWithManualLocks, applyPreset, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
+import { initialPayload, solveWithManualLocks, applyPreset, applyCmPreset, CM_PRESETS, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
 
 let state = {
   settings: null,
@@ -34,6 +34,17 @@ const ids = {
   dirt: document.getElementById('dirt'),
   threshold: document.getElementById('threshold'),
   maxConsec: document.getElementById('maxConsec'),
+  maxDistance: document.getElementById('maxDistance'),
+  cmPreset: document.getElementById('cmPreset'),
+  hintMatchWeight: document.getElementById('hintMatchWeight'),
+  btDistSprint: document.getElementById('btDistSprint'),
+  btDistMile: document.getElementById('btDistMile'),
+  btDistMedium: document.getElementById('btDistMedium'),
+  btDistLong: document.getElementById('btDistLong'),
+  btHandLeft: document.getElementById('btHandLeft'),
+  btHandRight: document.getElementById('btHandRight'),
+  btSurfTurf: document.getElementById('btSurfTurf'),
+  btSurfDirt: document.getElementById('btSurfDirt'),
   forcedClimax: document.getElementById('forcedClimax'),
   includeOpToggle: document.getElementById('includeOpToggle'),
   raceBonus: document.getElementById('raceBonus'),
@@ -42,6 +53,7 @@ const ids = {
   hintWeight: document.getElementById('hintWeight'),
   epithetMultiplier: document.getElementById('epithetMultiplier'),
   threeRacePenalty: document.getElementById('threeRacePenalty'),
+  fourRacePenalty: document.getElementById('fourRacePenalty'),
   raceCost: document.getElementById('raceCost'),
   fanBonus: document.getElementById('fanBonus'),
   rebuildBtn: document.getElementById('rebuildBtn'),
@@ -553,6 +565,16 @@ function populateStaticControls(payload) {
   ids.preset.value = initial;
   ids.presetInput.value = '';
   buildPresetDropdown('');
+  // Populate the CM preset dropdown from the static CM_PRESETS map.
+  if (ids.cmPreset) {
+    ids.cmPreset.innerHTML = '<option value="">(none)</option>';
+    for (const name of Object.keys(CM_PRESETS)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      ids.cmPreset.appendChild(opt);
+    }
+  }
   const displayRanks = [...payload.ranks].reverse();
   [ids.sprint, ids.mile, ids.medium, ids.long, ids.turf, ids.dirt, ids.threshold].forEach(el => fillSelect(el, displayRanks, 'A'));
 }
@@ -595,6 +617,7 @@ function selectPreset(name) {
 function settingsFromUI() {
   return {
     preset: ids.preset.value,
+    cm_preset: ids.cmPreset?.value || '',
     aptitudes: {
       Sprint: ids.sprint.value, Mile: ids.mile.value,
       Medium: ids.medium.value, Long: ids.long.value,
@@ -602,14 +625,33 @@ function settingsFromUI() {
     },
     threshold: ids.threshold.value,
     max_consecutive_races: Number(ids.maxConsec.value || 0),
+    max_distance: Number(ids.maxDistance?.value || 0),
     race_bonus_pct: Number(ids.raceBonus.value || 0),
     stat_weight: Number(ids.statWeight.value || 0),
     sp_weight: Number(ids.spWeight.value || 0),
     hint_weight: Number(ids.hintWeight.value || 0),
     epithet_multiplier: Number(ids.epithetMultiplier.value || 0),
     three_race_penalty_weight: Number(ids.threeRacePenalty.value || 0),
+    four_race_penalty_weight: Number(ids.fourRacePenalty?.value || 0),
     race_cost: Number(ids.raceCost.value || 0),
     fan_bonus_pct: Number(ids.fanBonus.value || 0),
+    hint_match_weight: Number(ids.hintMatchWeight?.value || 0),
+    build_target: {
+      distance: {
+        Sprint: Number(ids.btDistSprint?.value || 0),
+        Mile: Number(ids.btDistMile?.value || 0),
+        Medium: Number(ids.btDistMedium?.value || 0),
+        Long: Number(ids.btDistLong?.value || 0)
+      },
+      handedness: {
+        Left: Number(ids.btHandLeft?.value || 0),
+        Right: Number(ids.btHandRight?.value || 0)
+      },
+      surface: {
+        Turf: Number(ids.btSurfTurf?.value || 0),
+        Dirt: Number(ids.btSurfDirt?.value || 0)
+      }
+    },
     forced_epithets: [...state.forced_epithets],
     forced_climax: ids.forcedClimax.value || '',
     include_op: ids.includeOpToggle.checked
@@ -638,10 +680,59 @@ function loadSettingsToUI(settings) {
   ids.fanBonus.value = settings.fan_bonus_pct ?? 0;
   ids.forcedClimax.value = settings.forced_climax || '';
   ids.includeOpToggle.checked = !!settings.include_op;
+  // New build-target / CM-preset fields. Guarded with optional chaining so
+  // older saved schedules without these fields don't crash on import.
+  if (ids.cmPreset) ids.cmPreset.value = settings.cm_preset || '';
+  if (ids.maxDistance) ids.maxDistance.value = settings.max_distance || '';
+  if (ids.fourRacePenalty) ids.fourRacePenalty.value = settings.four_race_penalty_weight ?? 0;
+  if (ids.hintMatchWeight) ids.hintMatchWeight.value = settings.hint_match_weight ?? 0;
+  const bt = settings.build_target || {};
+  const btd = bt.distance || {};
+  const bth = bt.handedness || {};
+  const bts = bt.surface || {};
+  if (ids.btDistSprint) ids.btDistSprint.value = btd.Sprint ?? 0;
+  if (ids.btDistMile) ids.btDistMile.value = btd.Mile ?? 0;
+  if (ids.btDistMedium) ids.btDistMedium.value = btd.Medium ?? 0;
+  if (ids.btDistLong) ids.btDistLong.value = btd.Long ?? 0;
+  if (ids.btHandLeft) ids.btHandLeft.value = bth.Left ?? 0;
+  if (ids.btHandRight) ids.btHandRight.value = bth.Right ?? 0;
+  if (ids.btSurfTurf) ids.btSurfTurf.value = bts.Turf ?? 0;
+  if (ids.btSurfDirt) ids.btSurfDirt.value = bts.Dirt ?? 0;
   if (settings.forced_epithets) {
     state.forced_epithets = [...settings.forced_epithets];
     renderForcedEpithetList();
   }
+}
+
+// Applies a CM preset overlay to the build-target / max_distance UI fields
+// without touching aptitudes or other character-related settings. Selecting
+// the empty option clears the overlay (resets to zero / unlimited).
+function selectCmPreset(name) {
+  const preset = applyCmPreset(name);
+  if (!preset && name !== '') return;
+  if (!preset) {
+    // empty selection: reset overlay
+    if (ids.maxDistance) ids.maxDistance.value = '';
+    if (ids.hintMatchWeight) ids.hintMatchWeight.value = 0;
+    for (const el of [ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt]) {
+      if (el) el.value = 0;
+    }
+  } else {
+    if (ids.maxDistance) ids.maxDistance.value = preset.max_distance ?? '';
+    if (ids.hintMatchWeight) ids.hintMatchWeight.value = preset.hint_match_weight ?? 0;
+    const btd = preset.build_target?.distance || {};
+    const bth = preset.build_target?.handedness || {};
+    const bts = preset.build_target?.surface || {};
+    if (ids.btDistSprint) ids.btDistSprint.value = btd.Sprint ?? 0;
+    if (ids.btDistMile) ids.btDistMile.value = btd.Mile ?? 0;
+    if (ids.btDistMedium) ids.btDistMedium.value = btd.Medium ?? 0;
+    if (ids.btDistLong) ids.btDistLong.value = btd.Long ?? 0;
+    if (ids.btHandLeft) ids.btHandLeft.value = bth.Left ?? 0;
+    if (ids.btHandRight) ids.btHandRight.value = bth.Right ?? 0;
+    if (ids.btSurfTurf) ids.btSurfTurf.value = bts.Turf ?? 0;
+    if (ids.btSurfDirt) ids.btSurfDirt.value = bts.Dirt ?? 0;
+  }
+  queueSolve(0);
 }
 
 function currentFreezeLabel() {
@@ -782,7 +873,7 @@ function renderTurnCell(w) {
   const isNoRace = w.selected === '[No race]';
   const isLost = Boolean(w.lost);
 
-  card.className = `turn-card ${isLocked ? 'locked' : ''} ${isNoRace ? 'empty-turn' : ''} ${isLost ? 'lost-turn' : ''}`;
+  card.className = `turn-card ${isLocked ? 'locked' : ''} ${isNoRace ? 'empty-turn' : ''} ${isLost ? 'lost-turn' : ''} ${w.is_skippable ? 'is-skippable' : ''}`;
   if (w.grade) card.setAttribute('data-grade', w.grade);
   // Store epithet names for highlight matching
   const allEpNames = [...(w.epithet_names || []), ...(w.new_epithets || [])];
@@ -1229,7 +1320,29 @@ function bindAutoSolveListeners() {
     queueSolve(0);
   });
 
-  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.raceCost, ids.fanBonus].forEach(el => {
+  // CM preset overlay: when selected, populate the build-target fields.
+  if (ids.cmPreset) {
+    ids.cmPreset.addEventListener('change', () => {
+      selectCmPreset(ids.cmPreset.value);
+    });
+  }
+  // max_distance changes can make races ineligible — same lock-clearing logic
+  // as include_op / aptitude changes to avoid orphaned locks.
+  if (ids.maxDistance) {
+    ids.maxDistance.addEventListener('change', () => {
+      const kept = {};
+      for (const [k, v] of Object.entries(state.manual_locks)) {
+        if (v === '[No race]') kept[k] = v;
+      }
+      state.manual_locks = kept;
+      state.lost_locks = {};
+      state.freeze_before_index = null;
+      queueSolve(0);
+    });
+  }
+
+  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.fourRacePenalty, ids.raceCost, ids.fanBonus, ids.hintMatchWeight, ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt].forEach(el => {
+    if (!el) return;
     el.addEventListener('input', () => queueSolve(250));
     el.addEventListener('change', () => queueSolve(0));
   });

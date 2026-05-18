@@ -71,7 +71,8 @@ const ids = {
   statusNote: document.getElementById('statusNote'),
   summaryLine: document.getElementById('summaryLine'),
   scheduleYears: document.getElementById('scheduleYears'),
-  epithetList: document.getElementById('epithetList')
+  epithetList: document.getElementById('epithetList'),
+  turnStepper: document.getElementById('turnStepper')
 };
 
 const tooltip = document.getElementById('raceTooltip');
@@ -1141,6 +1142,235 @@ function renderSummary() {
   ids.summaryLine.textContent = freeze || 'Auto-updates as you change settings.';
 }
 
+/* ───── TURN STEPPER ─────
+   Linear walk through the schedule turn-by-turn. The "current" turn is the
+   first one after the freeze cursor. Each action (Confirm/Skip/Lost) commits
+   the choice and advances; Back un-commits the most recent freeze step. The
+   dropdown lets the user swap in any other eligible race at that turn without
+   leaving the stepper — useful when game RNG forces an off-plan pivot. */
+
+function getCurrentStepperIndex() {
+  if (!state.windows || !state.windows.length) return null;
+  const frozen = state.freeze_before_index;
+  const start = (frozen == null || frozen < 0) ? 0 : Number(frozen) + 1;
+  if (start >= state.windows.length) return null;
+  return start;
+}
+
+function renderTurnStepper() {
+  const stepper = ids.turnStepper;
+  if (!stepper) return;
+  stepper.innerHTML = '';
+
+  const idx = getCurrentStepperIndex();
+  const totalTurns = (state.windows && state.windows.length) || 0;
+  if (!totalTurns) return;
+
+  // Header (progress + title) — shared across all states
+  const header = document.createElement('div');
+  header.className = 'ts-header';
+  const title = document.createElement('span');
+  title.className = 'ts-title';
+  title.textContent = 'Run progress';
+  header.appendChild(title);
+  const progress = document.createElement('span');
+  progress.className = 'ts-progress';
+  progress.textContent = `${idx === null ? totalTurns : idx + 1} / ${totalTurns}`;
+  header.appendChild(progress);
+  stepper.appendChild(header);
+
+  // "All done" state
+  if (idx === null) {
+    const done = document.createElement('div');
+    done.className = 'ts-done';
+    done.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> All turns confirmed';
+    stepper.appendChild(done);
+
+    const actions = document.createElement('div');
+    actions.className = 'ts-actions';
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'ts-btn ts-btn-back';
+    backBtn.textContent = '← Back';
+    backBtn.addEventListener('click', stepperBack);
+    actions.appendChild(backBtn);
+    stepper.appendChild(actions);
+    return;
+  }
+
+  const w = state.windows[idx];
+  if (!w) return;
+
+  const currentSelection = w.selected || '[No race]';
+  const isNoRace = currentSelection === '[No race]';
+  const raceChoices = w.race_choices || [];
+  const selectedRaceObj = raceChoices.find(r => r.name === currentSelection);
+
+  const body = document.createElement('div');
+  body.className = 'ts-body';
+
+  // Turn label (year badge + period)
+  const turnLabel = document.createElement('div');
+  turnLabel.className = 'ts-turn-label';
+  const yearBadge = document.createElement('span');
+  yearBadge.className = `ts-year ts-year-${(w.year || '').toLowerCase()}`;
+  yearBadge.textContent = w.year || '';
+  turnLabel.appendChild(yearBadge);
+  const period = document.createElement('span');
+  period.className = 'ts-period';
+  period.textContent = `${w.month || ''} ${w.half || ''}`;
+  turnLabel.appendChild(period);
+  body.appendChild(turnLabel);
+
+  // Race picker dropdown (textContent for safety on user-visible strings)
+  const select = document.createElement('select');
+  select.className = 'ts-select';
+  const noRaceOpt = document.createElement('option');
+  noRaceOpt.value = '[No race]';
+  noRaceOpt.textContent = 'No race (training)';
+  if (isNoRace) noRaceOpt.selected = true;
+  select.appendChild(noRaceOpt);
+  for (const r of raceChoices) {
+    const opt = document.createElement('option');
+    opt.value = r.name;
+    opt.textContent = `${r.name} — ${r.grade} · ${r.distance} · ${r.length}m`;
+    if (r.name === currentSelection) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', (e) => stepperChangeRace(idx, e.target.value));
+  body.appendChild(select);
+
+  // Race metadata (only meaningful when a race is selected)
+  if (!isNoRace && selectedRaceObj) {
+    const meta = document.createElement('div');
+    meta.className = 'ts-race-meta';
+    const gradeChip = document.createElement('span');
+    gradeChip.className = 'ts-grade-chip';
+    gradeChip.setAttribute('data-grade', selectedRaceObj.grade || '');
+    gradeChip.textContent = selectedRaceObj.grade || '';
+    meta.appendChild(gradeChip);
+    const metaText = document.createElement('span');
+    metaText.className = 'ts-meta-text';
+    metaText.textContent = `${selectedRaceObj.surface} · ${selectedRaceObj.track}`;
+    meta.appendChild(metaText);
+    body.appendChild(meta);
+
+    const rewards = document.createElement('div');
+    rewards.className = 'ts-race-rewards';
+    rewards.textContent = `+${w.race_stats || 0} stats · +${w.race_sp || 0} SP · +${(w.race_fans || 0).toLocaleString()} fans`;
+    body.appendChild(rewards);
+  } else {
+    const trainHint = document.createElement('div');
+    trainHint.className = 'ts-race-meta ts-no-race-hint';
+    trainHint.textContent = 'Training turn — no race scheduled';
+    body.appendChild(trainHint);
+  }
+
+  // Epithet progress hint (small, optional)
+  const completed = w.new_epithets || [];
+  const linked = (w.epithet_names || []).filter(n => !completed.includes(n));
+  if (completed.length || linked.length) {
+    const ephint = document.createElement('div');
+    ephint.className = 'ts-epithet-hint';
+    if (completed.length) {
+      const c = document.createElement('span');
+      c.className = 'ts-ep-complete';
+      c.textContent = `Completes: ${completed.join(', ')}`;
+      ephint.appendChild(c);
+    }
+    if (linked.length) {
+      const l = document.createElement('span');
+      l.className = 'ts-ep-progress';
+      l.textContent = `Contributes to: ${linked.slice(0, 3).join(', ')}${linked.length > 3 ? ` (+${linked.length - 3})` : ''}`;
+      ephint.appendChild(l);
+    }
+    body.appendChild(ephint);
+  }
+
+  stepper.appendChild(body);
+
+  // Actions
+  const actions = document.createElement('div');
+  actions.className = 'ts-actions';
+
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'ts-btn ts-btn-back';
+  backBtn.textContent = '← Back';
+  backBtn.disabled = (state.freeze_before_index == null || state.freeze_before_index < 0);
+  backBtn.addEventListener('click', stepperBack);
+  actions.appendChild(backBtn);
+
+  const skipBtn = document.createElement('button');
+  skipBtn.type = 'button';
+  skipBtn.className = 'ts-btn ts-btn-skip';
+  skipBtn.textContent = 'Skip';
+  skipBtn.title = 'Mark this turn as training (no race)';
+  skipBtn.addEventListener('click', () => stepperAction(idx, 'skip'));
+  actions.appendChild(skipBtn);
+
+  const lostBtn = document.createElement('button');
+  lostBtn.type = 'button';
+  lostBtn.className = 'ts-btn ts-btn-lost';
+  lostBtn.textContent = 'Lost';
+  lostBtn.title = 'Race ran but did not place 1st — replan the win at a later turn';
+  lostBtn.disabled = isNoRace;
+  lostBtn.addEventListener('click', () => stepperAction(idx, 'lost'));
+  actions.appendChild(lostBtn);
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'ts-btn ts-btn-confirm';
+  confirmBtn.textContent = isNoRace ? 'Continue' : 'Confirm';
+  confirmBtn.title = isNoRace ? 'Continue training and advance' : 'Confirm this race won — advance to next turn';
+  confirmBtn.addEventListener('click', () => stepperAction(idx, 'confirm'));
+  actions.appendChild(confirmBtn);
+
+  stepper.appendChild(actions);
+}
+
+function stepperAction(idx, action) {
+  if (!state.windows || !state.windows[idx]) return;
+  const w = state.windows[idx];
+
+  if (solverEnabled) lockUpTo(idx);
+
+  if (action === 'skip') {
+    state.manual_locks[String(idx)] = '[No race]';
+    delete state.lost_locks[String(idx)];
+  } else if (action === 'lost') {
+    if (w.selected === '[No race]') return;
+    state.manual_locks[String(idx)] = w.selected;
+    state.lost_locks[String(idx)] = true;
+  } else if (action === 'confirm') {
+    // lockUpTo() already wrote manual_locks[idx] = w.selected if it wasn't set.
+    // Ensure no stale lost flag remains on a confirm.
+    delete state.lost_locks[String(idx)];
+  }
+
+  if (solverEnabled) state.freeze_before_index = idx;
+  queueSolve(0);
+}
+
+function stepperBack() {
+  if (state.freeze_before_index == null) return;
+  const idx = Number(state.freeze_before_index);
+  delete state.manual_locks[String(idx)];
+  delete state.lost_locks[String(idx)];
+  state.freeze_before_index = idx > 0 ? idx - 1 : null;
+  queueSolve(0);
+}
+
+function stepperChangeRace(idx, raceName) {
+  // Live preview: lock the choice immediately so the calendar above reflects it,
+  // but do NOT advance the freeze cursor. The user must still hit Confirm.
+  state.manual_locks[String(idx)] = raceName;
+  if (raceName === '[No race]') {
+    delete state.lost_locks[String(idx)];
+  }
+  queueSolve(0);
+}
+
 /* ───── APPLY / SOLVE ───── */
 function applyPayload(payload) {
   state.settings = payload.settings;
@@ -1153,6 +1383,7 @@ function applyPayload(payload) {
   renderSummary();
   renderSchedule();
   renderEpithets();
+  renderTurnStepper();
   // Persist state so it survives refresh
   saveStateToStorage();
 }
@@ -1184,6 +1415,7 @@ function queueSolve(delay = 250) {
     applyManualLocksToWindows();
     renderSchedule();
     renderSummary();
+    renderTurnStepper();
     saveStateToStorage();
     return;
   }
@@ -1398,6 +1630,7 @@ async function init() {
   renderSummary();
   renderSchedule();
   renderEpithets();
+  renderTurnStepper();
 
   // Restore state: URL hash > localStorage > defaults
   if (hash) {

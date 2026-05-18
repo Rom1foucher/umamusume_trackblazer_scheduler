@@ -797,6 +797,116 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
   border: 2px solid var(--stroke); border-radius: var(--radius-lg);
   box-shadow: var(--shadow); overflow: hidden;
 }
+
+/* ═══════════════════════════════════════════════════
+   TURN STEPPER
+   ─ Linear walk through the schedule. Lives below the
+   ─ epithet panel; shares its card visual language but
+   ─ adds a slim header strip + action button row.
+   ═══════════════════════════════════════════════════ */
+.turn-stepper {
+  margin-top: 8px; background: var(--panel);
+  border: 2px solid var(--stroke); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.turn-stepper:empty { display: none; }
+.ts-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px; font-size: 14px; font-weight: 800; color: var(--text);
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border-bottom: 1px solid var(--stroke);
+}
+.ts-progress {
+  font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.ts-body {
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.ts-turn-label {
+  display: flex; align-items: center; gap: 8px;
+}
+.ts-year {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
+  border: 1px solid;
+}
+.ts-year-junior { background: var(--junior-bg); color: var(--junior); border-color: var(--junior-border); }
+.ts-year-classic { background: var(--classic-bg); color: var(--classic-header); border-color: var(--classic-border); }
+.ts-year-senior { background: var(--senior-bg); color: var(--senior); border-color: var(--senior-border); }
+.ts-period {
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.ts-select {
+  width: 100%; padding: 8px 10px; border: 2px solid var(--stroke);
+  border-radius: 0.5rem; background: var(--panel);
+  font-size: 13px; font-weight: 600; color: var(--text);
+  cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ts-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(121,202,11,0.18); }
+.ts-race-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-light);
+}
+.ts-grade-chip {
+  display: inline-block; padding: 2px 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 800; color: #fff;
+  background: var(--stroke);
+}
+.ts-grade-chip[data-grade="G1"] { background: var(--g1); }
+.ts-grade-chip[data-grade="G2"] { background: var(--g2); }
+.ts-grade-chip[data-grade="G3"] { background: var(--g3); }
+.ts-grade-chip[data-grade="OP"], .ts-grade-chip[data-grade="Pre-OP"] { background: var(--op-color); color: #4e3600; }
+.ts-meta-text { font-weight: 600; }
+.ts-race-rewards {
+  font-size: 12px; color: var(--text-muted); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ts-no-race-hint { font-style: italic; color: var(--text-muted); }
+.ts-epithet-hint {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; padding-top: 4px;
+  border-top: 1px dashed var(--stroke-light);
+}
+.ts-ep-complete { color: var(--green-text); font-weight: 700; }
+.ts-ep-progress { color: var(--text-muted); }
+.ts-actions {
+  display: flex; gap: 8px; padding: 8px 12px 12px;
+  border-top: 1px solid var(--stroke-light);
+}
+.ts-btn {
+  flex: 1; padding: 9px 10px; border: 2px solid;
+  border-radius: 0.5rem; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: transform 0.1s, box-shadow 0.15s, background 0.15s, opacity 0.15s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  background: var(--btn-secondary-bg); color: var(--text); border-color: var(--stroke);
+}
+.ts-btn:active:not(:disabled) { transform: scale(0.95); }
+.ts-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ts-btn-back { flex: 0 0 auto; padding: 9px 12px; }
+.ts-btn-back:hover:not(:disabled) { border-color: var(--text-muted); box-shadow: var(--shadow); }
+.ts-btn-skip:hover:not(:disabled) { border-color: var(--text-muted); box-shadow: var(--shadow); }
+.ts-btn-lost {
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  border-color: #c68400; color: #4e3600; text-shadow: 0 1px 1px rgba(255,255,255,0.3);
+}
+.ts-btn-lost:hover:not(:disabled) { box-shadow: 0 2px 12px rgba(255,179,0,0.35); border-color: #a06800; }
+.ts-btn-confirm {
+  background: linear-gradient(180deg, var(--accent-light), var(--accent));
+  border-color: #386c03; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+.ts-btn-confirm:hover:not(:disabled) { box-shadow: 0 2px 12px rgba(96,189,13,0.35); border-color: #2a5500; }
+.ts-done {
+  padding: 16px 12px; text-align: center; font-weight: 700; color: var(--green-text);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+
+/* Narrow viewports: button row wraps cleanly */
+@media (max-width: 700px) {
+  .ts-actions { flex-wrap: wrap; }
+  .ts-btn { flex-basis: calc(50% - 4px); }
+  .ts-btn-back { flex-basis: 100%; }
+}
 .epithet-heading {
   padding: 9px 12px; font-size: 14px; font-weight: 800;
   color: var(--text);

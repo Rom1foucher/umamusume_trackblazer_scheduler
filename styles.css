@@ -424,14 +424,15 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
 
 .year-sections {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0; align-items: stretch;
+  gap: 10px; align-items: stretch; padding: 8px;
 }
 
 .year-section {
-  border-right: 2px solid var(--stroke); overflow: hidden;
+  border: 1px solid var(--stroke); border-radius: var(--radius);
+  overflow: hidden;
   display: flex; flex-direction: column;
 }
-.year-section:last-child { border-right: none; }
+.year-section:last-child { /* gap handles separation now; no border-right override needed */ }
 .year-grid { flex: 1; }
 
 .year-header {
@@ -494,6 +495,24 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
     rgba(212, 160, 32, 0.13) 8px,
     rgba(212, 160, 32, 0.13) 12px
   );
+}
+
+/* Current stepper turn: thick inset red ring so the highlight stays fully
+   inside the card and isn't clipped by the parent year-section's overflow.
+   Drawn over the grade stripe's left/right edges only — the colored center
+   of the stripe remains visible at the top. */
+.turn-card.current-turn {
+  box-shadow: inset 0 0 0 3px #d32f2f !important;
+  z-index: 3;
+}
+.turn-card.current-turn:hover {
+  box-shadow: inset 0 0 0 3px #d32f2f, inset 0 0 0 5px var(--accent) !important;
+}
+[data-theme="dark"] .turn-card.current-turn {
+  box-shadow: inset 0 0 0 3px #ef5350 !important;
+}
+[data-theme="dark"] .turn-card.current-turn:hover {
+  box-shadow: inset 0 0 0 3px #ef5350, inset 0 0 0 5px var(--accent) !important;
 }
 
 /* Grade-colored top stripe */
@@ -837,32 +856,27 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
 .ts-period {
   font-size: 14px; font-weight: 700; color: var(--text);
 }
-.ts-select {
-  width: 100%; padding: 8px 10px; border: 2px solid var(--stroke);
-  border-radius: 0.5rem; background: var(--panel);
-  font-size: 13px; font-weight: 600; color: var(--text);
-  cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+/* Race picker list inside the stepper — reuses .tt-race-* classes from the
+   calendar tooltip for visual consistency, with a small layout override so
+   the list breathes in the wider stepper card. */
+.turn-stepper .tt-race-list {
+  max-height: 260px; margin: 0;
 }
-.ts-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(121,202,11,0.18); }
-.ts-race-meta {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text-light);
+/* "Over cap" tag pill — appears on races above max_distance when the toggle
+   is on. Solver won't recommend them but the user can pick them manually. */
+.tt-race-item.tt-ri-over {
+  opacity: 0.65;
 }
-.ts-grade-chip {
-  display: inline-block; padding: 2px 6px; border-radius: 4px;
-  font-size: 11px; font-weight: 800; color: #fff;
-  background: var(--stroke);
+.tt-race-item.tt-ri-over:hover { opacity: 1; }
+.tt-ri-over-tag {
+  display: inline-block; padding: 1px 6px;
+  border-radius: 4px; font-size: 9px; font-weight: 800;
+  background: rgba(212, 160, 32, 0.18); color: #8a6500;
+  border: 1px solid var(--op-color);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
-.ts-grade-chip[data-grade="G1"] { background: var(--g1); }
-.ts-grade-chip[data-grade="G2"] { background: var(--g2); }
-.ts-grade-chip[data-grade="G3"] { background: var(--g3); }
-.ts-grade-chip[data-grade="OP"], .ts-grade-chip[data-grade="Pre-OP"] { background: var(--op-color); color: #4e3600; }
-.ts-meta-text { font-weight: 600; }
-.ts-race-rewards {
-  font-size: 12px; color: var(--text-muted); font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.ts-no-race-hint { font-style: italic; color: var(--text-muted); }
+[data-theme="dark"] .tt-ri-over-tag { color: #ffcc66; background: rgba(212, 160, 32, 0.25); }
 .ts-epithet-hint {
   display: flex; flex-direction: column; gap: 2px;
   font-size: 11px; padding-top: 4px;
@@ -938,6 +952,44 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
 .epithet-card .reward { color: var(--green-text); font-size: 12px; font-weight: 700; }
 .epithet-card .condition { color: var(--text-muted); font-size: 12px; line-height: 1.4; margin-top: 4px; }
 .epithet-card .value { color: var(--accent-dark); font-size: 11px; font-weight: 700; margin-top: 5px; }
+
+/* Progress fraction shown inline in the epithet card title (e.g. "5 / 3").
+   "complete" = exact match, "surplus" = current > required (skippable surplus),
+   "partial" = in-progress (current < required, epithet not yet earned). */
+.epithet-progress {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  border-radius: 999px; font-size: 11px; font-weight: 800;
+  font-variant-numeric: tabular-nums; vertical-align: 1px;
+  border: 1px solid;
+}
+.epithet-progress.complete {
+  background: var(--g3-bg); color: var(--g3); border-color: var(--g3);
+}
+.epithet-progress.surplus {
+  background: rgba(212, 160, 32, 0.12); color: #8a6500; border-color: var(--op-color);
+}
+.epithet-progress.partial {
+  background: var(--panel-2); color: var(--text-muted); border-color: var(--stroke);
+}
+[data-theme="dark"] .epithet-progress.surplus {
+  color: #ffcc66;
+}
+
+/* In-progress epithet card: greyed out to clearly distinguish from earned ones
+   while preserving readability. Visual hierarchy: completed (full opacity)
+   above in-progress (~55% opacity). */
+.epithet-card.in-progress {
+  opacity: 0.55;
+  filter: saturate(0.6);
+  background: var(--panel-2);
+}
+.epithet-card.in-progress:hover {
+  opacity: 0.85;
+  filter: saturate(0.85);
+}
+.epithet-card.in-progress .value {
+  color: var(--text-muted); font-style: italic; font-weight: 600;
+}
 .empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
 .hidden { display: none !important; }
 
@@ -951,8 +1003,8 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
 }
 @media (max-width: 850px) {
   .year-sections { grid-template-columns: 1fr; }
-  .year-section { border-right: none; border-bottom: 2px solid var(--stroke); }
-  .year-section:last-child { border-bottom: none; }
+  /* On a single column, default top/bottom borders + outer gap give the spacing.
+     No bespoke override needed — the year-section borders already do the job. */
 }
 @media (max-width: 600px) {
   body { font-size: 14px; -webkit-text-size-adjust: 100%; }

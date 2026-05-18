@@ -35,6 +35,7 @@ const ids = {
   threshold: document.getElementById('threshold'),
   maxConsec: document.getElementById('maxConsec'),
   maxDistance: document.getElementById('maxDistance'),
+  showOverDistanceToggle: document.getElementById('showOverDistanceToggle'),
   cmPreset: document.getElementById('cmPreset'),
   hintMatchWeight: document.getElementById('hintMatchWeight'),
   btDistSprint: document.getElementById('btDistSprint'),
@@ -47,6 +48,8 @@ const ids = {
   btSurfDirt: document.getElementById('btSurfDirt'),
   forcedClimax: document.getElementById('forcedClimax'),
   includeOpToggle: document.getElementById('includeOpToggle'),
+  showProgressToggle: document.getElementById('showProgressToggle'),
+  showInProgressToggle: document.getElementById('showInProgressToggle'),
   raceBonus: document.getElementById('raceBonus'),
   statWeight: document.getElementById('statWeight'),
   spWeight: document.getElementById('spWeight'),
@@ -655,7 +658,10 @@ function settingsFromUI() {
     },
     forced_epithets: [...state.forced_epithets],
     forced_climax: ids.forcedClimax.value || '',
-    include_op: ids.includeOpToggle.checked
+    include_op: ids.includeOpToggle.checked,
+    show_epithet_progress: ids.showProgressToggle ? ids.showProgressToggle.checked : true,
+    show_in_progress_epithets: ids.showInProgressToggle ? ids.showInProgressToggle.checked : true,
+    show_over_distance_races: ids.showOverDistanceToggle ? ids.showOverDistanceToggle.checked : false
   };
 }
 
@@ -681,6 +687,11 @@ function loadSettingsToUI(settings) {
   ids.fanBonus.value = settings.fan_bonus_pct ?? 0;
   ids.forcedClimax.value = settings.forced_climax || '';
   ids.includeOpToggle.checked = !!settings.include_op;
+  // Display toggles default to true when absent so older saved schedules
+  // (pre-feature) still get the new UI affordances.
+  if (ids.showProgressToggle) ids.showProgressToggle.checked = settings.show_epithet_progress !== false;
+  if (ids.showInProgressToggle) ids.showInProgressToggle.checked = settings.show_in_progress_epithets !== false;
+  if (ids.showOverDistanceToggle) ids.showOverDistanceToggle.checked = settings.show_over_distance_races === true;
   // New build-target / CM-preset fields. Guarded with optional chaining so
   // older saved schedules without these fields don't crash on import.
   if (ids.cmPreset) ids.cmPreset.value = settings.cm_preset || '';
@@ -875,6 +886,7 @@ function renderTurnCell(w) {
   const isLost = Boolean(w.lost);
 
   card.className = `turn-card ${isLocked ? 'locked' : ''} ${isNoRace ? 'empty-turn' : ''} ${isLost ? 'lost-turn' : ''} ${w.is_skippable ? 'is-skippable' : ''}`;
+  card.setAttribute('data-index', String(w.index));
   if (w.grade) card.setAttribute('data-grade', w.grade);
   // Store epithet names for highlight matching
   const allEpNames = [...(w.epithet_names || []), ...(w.new_epithets || [])];
@@ -1051,20 +1063,46 @@ function highlightEpithet(name) {
 function renderEpithets() {
   ids.epithetList.innerHTML = '';
   activeEpithetHighlight = null;
-  if (!state.epithets.length) {
+
+  // Display preferences (default ON; respect toggle state when present)
+  const showProgress = state.settings ? state.settings.show_epithet_progress !== false : true;
+  const showInProgress = state.settings ? state.settings.show_in_progress_epithets !== false : true;
+
+  const completed = state.epithets || [];
+  const inProgress = showInProgress ? (state.epithets_in_progress || []) : [];
+
+  if (!completed.length && !inProgress.length) {
     ids.epithetList.innerHTML = '<div class="empty">No epithets completed under the current schedule.</div>';
     return;
   }
-  state.epithets.forEach(ep => {
+
+  const renderCard = (ep) => {
     const card = document.createElement('div');
-    card.className = 'epithet-card';
+    const isInProgress = ep.status === 'in_progress';
+    card.className = 'epithet-card' + (isInProgress ? ' in-progress' : '');
     const color = getEpithetColor(ep.name);
+    let progressHtml = '';
+    if (showProgress && ep.progress) {
+      const { current, required } = ep.progress;
+      const surplus = Math.max(0, current - required);
+      let fractionClass = 'epithet-progress complete';
+      let title = 'Exactly meets the requirement';
+      if (isInProgress) {
+        fractionClass = 'epithet-progress partial';
+        const missing = required - current;
+        title = `${missing} more contributing race${missing > 1 ? 's' : ''} needed to complete`;
+      } else if (surplus > 0) {
+        fractionClass = 'epithet-progress surplus';
+        title = `${surplus} race${surplus > 1 ? 's' : ''} beyond the requirement — potentially skippable`;
+      }
+      progressHtml = `<span class="${fractionClass}" title="${title}">${current} / ${required}</span>`;
+    }
     card.innerHTML = `
       <div class="epithet-color-dot" style="background:${color}"></div>
-      <h4>${ep.name}</h4>
+      <h4>${ep.name} ${progressHtml}</h4>
       <div class="reward">${ep.reward_text}</div>
       <div class="condition">${ep.condition_text}</div>
-      <div class="value">Weighted value: ${ep.weighted_value}</div>
+      <div class="value">${isInProgress ? 'Not yet completed' : `Weighted value: ${ep.weighted_value}`}</div>
     `;
     card.style.cursor = 'pointer';
     card.addEventListener('click', () => {
@@ -1076,8 +1114,12 @@ function renderEpithets() {
         card.classList.add('active');
       }
     });
-    ids.epithetList.appendChild(card);
-  });
+    return card;
+  };
+
+  // Completed first (full opacity), then in-progress (greyed) for visual hierarchy
+  completed.forEach(ep => ids.epithetList.appendChild(renderCard(ep)));
+  inProgress.forEach(ep => ids.epithetList.appendChild(renderCard(ep)));
 }
 
 /* ───── RENDER: SUMMARY ───── */
@@ -1152,9 +1194,17 @@ function renderSummary() {
 function getCurrentStepperIndex() {
   if (!state.windows || !state.windows.length) return null;
   const frozen = state.freeze_before_index;
-  const start = (frozen == null || frozen < 0) ? 0 : Number(frozen) + 1;
-  if (start >= state.windows.length) return null;
-  return start;
+  const baseStart = (frozen == null || frozen < 0) ? 0 : Number(frozen) + 1;
+  if (baseStart >= state.windows.length) return null;
+  // Auto-skip forward over training turns to land on the next real race.
+  // Training turns stay editable via the calendar card; the stepper focuses
+  // on actual race decisions so you're not asked to confirm 15 empty turns
+  // at the start of Junior year or summer camps.
+  for (let i = baseStart; i < state.windows.length; i += 1) {
+    const w = state.windows[i];
+    if (w && w.selected && w.selected !== '[No race]') return i;
+  }
+  return null;
 }
 
 function renderTurnStepper() {
@@ -1195,6 +1245,7 @@ function renderTurnStepper() {
     backBtn.addEventListener('click', stepperBack);
     actions.appendChild(backBtn);
     stepper.appendChild(actions);
+    updateCurrentTurnHighlight(null);
     return;
   }
 
@@ -1222,49 +1273,65 @@ function renderTurnStepper() {
   turnLabel.appendChild(period);
   body.appendChild(turnLabel);
 
-  // Race picker dropdown (textContent for safety on user-visible strings)
-  const select = document.createElement('select');
-  select.className = 'ts-select';
-  const noRaceOpt = document.createElement('option');
-  noRaceOpt.value = '[No race]';
-  noRaceOpt.textContent = 'No race (training)';
-  if (isNoRace) noRaceOpt.selected = true;
-  select.appendChild(noRaceOpt);
-  for (const r of raceChoices) {
-    const opt = document.createElement('option');
-    opt.value = r.name;
-    opt.textContent = `${r.name} — ${r.grade} · ${r.distance} · ${r.length}m`;
-    if (r.name === currentSelection) opt.selected = true;
-    select.appendChild(opt);
-  }
-  select.addEventListener('change', (e) => stepperChangeRace(idx, e.target.value));
-  body.appendChild(select);
+  // Race picker: list view inspired by the calendar tooltip. Shows every
+  // eligible race at this turn with grade/distance/stats/epithet-dots at a
+  // glance. Includes "Auto" (let solver pick) and "No race — train".
+  // When show_over_distance_races is on, races above max_distance also appear,
+  // visually marked as "over cap" so the user can lock an off-plan race they
+  // actually ran in-game. The solver still won't recommend those on its own.
+  const completedNames = (state.epithets || []).map(e => e.name);
+  const preds = epithetRacePredicates(completedNames);
+  const lockValue = state.manual_locks[String(idx)];
 
-  // Race metadata (only meaningful when a race is selected)
-  if (!isNoRace && selectedRaceObj) {
-    const meta = document.createElement('div');
-    meta.className = 'ts-race-meta';
-    const gradeChip = document.createElement('span');
-    gradeChip.className = 'ts-grade-chip';
-    gradeChip.setAttribute('data-grade', selectedRaceObj.grade || '');
-    gradeChip.textContent = selectedRaceObj.grade || '';
-    meta.appendChild(gradeChip);
-    const metaText = document.createElement('span');
-    metaText.className = 'ts-meta-text';
-    metaText.textContent = `${selectedRaceObj.surface} · ${selectedRaceObj.track}`;
-    meta.appendChild(metaText);
-    body.appendChild(meta);
+  const list = document.createElement('div');
+  list.className = 'tt-race-list ts-race-list';
 
-    const rewards = document.createElement('div');
-    rewards.className = 'ts-race-rewards';
-    rewards.textContent = `+${w.race_stats || 0} stats · +${w.race_sp || 0} SP · +${(w.race_fans || 0).toLocaleString()} fans`;
-    body.appendChild(rewards);
-  } else {
-    const trainHint = document.createElement('div');
-    trainHint.className = 'ts-race-meta ts-no-race-hint';
-    trainHint.textContent = 'Training turn — no race scheduled';
-    body.appendChild(trainHint);
+  if (solverEnabled) {
+    const autoItem = document.createElement('div');
+    autoItem.className = `tt-race-item ${(!lockValue || lockValue === 'Auto') ? 'selected' : ''}`;
+    autoItem.innerHTML = `<span class="tt-ri-name">Auto (solver picks)</span>`;
+    autoItem.addEventListener('click', () => stepperChangeRace(idx, 'Auto'));
+    list.appendChild(autoItem);
   }
+
+  const noRaceItem = document.createElement('div');
+  noRaceItem.className = `tt-race-item tt-ri-skip ${lockValue === '[No race]' || (currentSelection === '[No race]' && !lockValue) ? 'selected' : ''}`;
+  noRaceItem.innerHTML = `<span class="tt-ri-name">No Race — Train</span>`;
+  noRaceItem.addEventListener('click', () => stepperChangeRace(idx, '[No race]'));
+  list.appendChild(noRaceItem);
+
+  for (const rc of raceChoices) {
+    const isCurrent = rc.name === currentSelection;
+    const isLocked = rc.name === lockValue;
+    const item = document.createElement('div');
+    let cls = `tt-race-item ${isLocked ? 'selected' : ''} ${isCurrent && !isLocked ? 'current' : ''}`;
+    if (rc.over_distance) cls += ' tt-ri-over';
+    item.className = cls;
+    // Epithet contribution dots
+    const epDots = [];
+    for (const [epName, pred] of Object.entries(preds)) {
+      if (pred({ name: rc.name, year: w.year, grade: rc.grade, distance: rc.distance, surface: rc.surface, track: rc.track })) {
+        epDots.push(epName);
+      }
+    }
+    const dotsHtml = epDots.length
+      ? `<span class="tt-ri-dots">${epDots.map(n => `<span class="edot" style="background:${getEpithetColor(n)}" title="${n}"></span>`).join('')}</span>`
+      : '';
+    const overTag = rc.over_distance
+      ? `<span class="tt-ri-over-tag" title="Above max distance cap — solver won't recommend it but you can pick it manually">over cap</span>`
+      : '';
+    item.innerHTML = `
+      <span class="grade-badge ${gradeClass(rc.grade)}" style="font-size:9px">${rc.grade}</span>
+      <span class="tt-ri-name">${rc.name}</span>
+      <span class="tt-ri-meta">${rc.surface} ${rc.distance} ${rc.length || ''}m</span>
+      <span class="tt-ri-stats">+${rc.stats} / +${rc.sp}</span>
+      ${overTag}
+      ${dotsHtml}
+    `;
+    item.addEventListener('click', () => stepperChangeRace(idx, rc.name));
+    list.appendChild(item);
+  }
+  body.appendChild(list);
 
   // Epithet progress hint (small, optional)
   const completed = w.new_epithets || [];
@@ -1327,6 +1394,18 @@ function renderTurnStepper() {
   actions.appendChild(confirmBtn);
 
   stepper.appendChild(actions);
+
+  updateCurrentTurnHighlight(idx);
+}
+
+// Highlight the current stepper turn on the calendar so the user sees at a
+// glance which card the stepper is pointed at. Called from renderTurnStepper
+// after the stepper has computed its target index.
+function updateCurrentTurnHighlight(idx) {
+  document.querySelectorAll('.turn-card.current-turn').forEach(el => el.classList.remove('current-turn'));
+  if (idx == null) return;
+  const card = document.querySelector(`.turn-card[data-index="${idx}"]`);
+  if (card) card.classList.add('current-turn');
 }
 
 function stepperAction(idx, action) {
@@ -1354,19 +1433,38 @@ function stepperAction(idx, action) {
 
 function stepperBack() {
   if (state.freeze_before_index == null) return;
-  const idx = Number(state.freeze_before_index);
-  delete state.manual_locks[String(idx)];
-  delete state.lost_locks[String(idx)];
-  state.freeze_before_index = idx > 0 ? idx - 1 : null;
+  const frozen = Number(state.freeze_before_index);
+  // Find the most recent confirmed race within the frozen prefix. Undoing the
+  // last race confirmation is the natural inverse of the auto-skip-forward
+  // semantics — symmetrical, predictable, and avoids back-stepping turn-by-turn
+  // through long training stretches.
+  let raceIdx = null;
+  for (let i = frozen; i >= 0; i -= 1) {
+    const w = state.windows[i];
+    if (w && w.selected && w.selected !== '[No race]') {
+      raceIdx = i;
+      break;
+    }
+  }
+  const targetIdx = raceIdx != null ? raceIdx : frozen;
+  delete state.manual_locks[String(targetIdx)];
+  delete state.lost_locks[String(targetIdx)];
+  state.freeze_before_index = targetIdx > 0 ? targetIdx - 1 : null;
   queueSolve(0);
 }
 
 function stepperChangeRace(idx, raceName) {
   // Live preview: lock the choice immediately so the calendar above reflects it,
   // but do NOT advance the freeze cursor. The user must still hit Confirm.
-  state.manual_locks[String(idx)] = raceName;
-  if (raceName === '[No race]') {
+  // "Auto" removes any explicit lock at this turn so the solver re-decides.
+  if (raceName === 'Auto') {
+    delete state.manual_locks[String(idx)];
     delete state.lost_locks[String(idx)];
+  } else {
+    state.manual_locks[String(idx)] = raceName;
+    if (raceName === '[No race]') {
+      delete state.lost_locks[String(idx)];
+    }
   }
   queueSolve(0);
 }
@@ -1377,6 +1475,7 @@ function applyPayload(payload) {
   state.summary = payload.summary;
   state.windows = payload.windows;
   state.epithets = payload.epithets;
+  state.epithets_in_progress = payload.epithets_in_progress || [];
   state.manual_locks = payload.manual_locks || {};
   state.current_selected = payload.current_selected || [];
   loadSettingsToUI(payload.settings);
@@ -1573,6 +1672,27 @@ function bindAutoSolveListeners() {
     });
   }
 
+  // Display-only toggles: just re-render the epithet list, no re-solve needed.
+  // The in-progress data and progress fractions are already in state.epithets.
+  [ids.showProgressToggle, ids.showInProgressToggle].forEach(el => {
+    if (!el) return;
+    el.addEventListener('change', () => {
+      if (state.settings) {
+        state.settings.show_epithet_progress = ids.showProgressToggle ? ids.showProgressToggle.checked : true;
+        state.settings.show_in_progress_epithets = ids.showInProgressToggle ? ids.showInProgressToggle.checked : true;
+      }
+      renderEpithets();
+      saveStateToStorage();
+    });
+  });
+
+  // Show-over-distance toggle: changes which races appear in race_choices,
+  // which is built inside the solver's formatPayload. A re-solve is the
+  // simplest way to refresh the per-window choice lists.
+  if (ids.showOverDistanceToggle) {
+    ids.showOverDistanceToggle.addEventListener('change', () => queueSolve(0));
+  }
+
   [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.fourRacePenalty, ids.raceCost, ids.fanBonus, ids.hintMatchWeight, ids.btDistSprint, ids.btDistMile, ids.btDistMedium, ids.btDistLong, ids.btHandLeft, ids.btHandRight, ids.btSurfTurf, ids.btSurfDirt].forEach(el => {
     if (!el) return;
     el.addEventListener('input', () => queueSolve(250));
@@ -1625,6 +1745,7 @@ async function init() {
   state.summary = payload.summary;
   state.windows = payload.windows;
   state.epithets = payload.epithets;
+  state.epithets_in_progress = payload.epithets_in_progress || [];
   state.current_selected = payload.current_selected || [];
   loadSettingsToUI(payload.settings);
   renderSummary();

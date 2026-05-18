@@ -77,6 +77,19 @@
       </div>
 
       <div class="form-group">
+        <div class="label">Epithet display</div>
+        <label class="label toggle-label" for="showProgressToggle">
+          <input type="checkbox" id="showProgressToggle" checked>
+          <span>Show progress (e.g. 5 / 3)</span>
+        </label>
+        <label class="label toggle-label" for="showInProgressToggle">
+          <input type="checkbox" id="showInProgressToggle" checked>
+          <span>Show started-but-not-completed epithets (greyed)</span>
+        </label>
+        <div class="helper" style="margin-top:4px;">Reveals surplus (skippable races) and near-completions so you can plan tradeoffs.</div>
+      </div>
+
+      <div class="form-group">
         <label class="label" for="maxConsec">Max races in a row</label>
         <input id="maxConsec" type="number" min="0" step="1" placeholder="No limit">
         <div class="helper" style="margin-top:4px;">Hard cap on consecutive races. Leave empty or 0 for no limit.</div>
@@ -86,6 +99,11 @@
         <label class="label" for="maxDistance">Max race distance (m)</label>
         <input id="maxDistance" type="number" min="0" step="100" placeholder="No limit">
         <div class="helper" style="margin-top:4px;">Hard cap on race length. Excludes any race longer than this — useful to avoid stayer epithets (Spring Senior, etc.) when training for a Mile or Sprint CM. Leave empty for no limit.</div>
+        <label class="label toggle-label" for="showOverDistanceToggle" style="margin-top:6px;">
+          <input type="checkbox" id="showOverDistanceToggle">
+          <span>Show over-cap races in the picker</span>
+        </label>
+        <div class="helper" style="margin-top:4px;">Lets you manually pick a race that exceeds the cap (e.g. if game RNG forces an off-plan run). The solver still ignores them — they only appear in the turn stepper's list.</div>
       </div>
 
       <details class="advanced" id="buildTargetSection">
@@ -271,14 +289,14 @@
       <div id="scheduleYears" class="year-sections"></div>
     </div>
 
+    <!-- Turn stepper: walk through the schedule turn by turn -->
+    <div class="turn-stepper" id="turnStepper" aria-live="polite"></div>
+
     <!-- Epithets -->
     <div class="epithet-panel">
       <div class="epithet-heading">Epithets from Current Schedule</div>
       <div id="epithetList" class="epithet-list"></div>
     </div>
-
-    <!-- Turn stepper: walk through the schedule turn by turn -->
-    <div class="turn-stepper" id="turnStepper" aria-live="polite"></div>
   </div>
 
   <!-- Tooltip container -->

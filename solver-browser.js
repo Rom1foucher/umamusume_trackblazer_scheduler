@@ -323,7 +323,10 @@ function defaultSettings() {
     },
     forced_epithets: [],
     forced_climax: '',
-    include_op: false
+    include_op: false,
+    show_epithet_progress: true,
+    show_in_progress_epithets: true,
+    show_over_distance_races: false
   };
 }
 
@@ -564,6 +567,71 @@ function completedEpithets(selectedRaces, data) {
   if (springChampion && fallChampion && (stunning || lady)) done.add('Legendary');
 
   return data.epithets.filter(e => done.has(e.name)).map(e => e.name);
+}
+
+// Required count for each known epithet. For threshold-based epithets this is
+// the lower bound (e.g. "Kanto Conqueror" needs ≥3 contributing races); for
+// "all of X" set-based epithets it's the set size. Returns null for epithets
+// without a meaningful count semantics — those just don't get a progress UI.
+function epithetRequiredCount(epithetName) {
+  const map = {
+    // Threshold-based counters (current can exceed required → surplus visible)
+    'Dirt G1 Achiever': 3,
+    'Dirt G1 Star': 4,
+    'Dirt G1 Powerhouse': 5,
+    'Dirt G1 Dominator': 9,
+    'Standard Distance Leader': 10,
+    'Non-Standard Distance Leader': 10,
+    'Dirty Work': 5,
+    'Playing Dirty': 10,
+    'Eat My Dust': 15,
+    'Pro Racer': 10,
+    'Junior Jewel': 3,
+    'Globe-Trotter': 3,
+    'Umatastic': 3,
+    'Kanto Conqueror': 3,
+    'West Japan Whiz': 3,
+    'Tohoku Top Dog': 3,
+    'Hokkaido Hotshot': 3,
+    'Kokura Constable': 2,
+    // All-of (binary): current is capped at required
+    'Stunning': 3,
+    'Lady': 3,
+    'Spring Champion': 3,
+    'Fall Champion': 3,
+    'Shield Bearer': 2,
+    'Breakneck Miler': 3,
+    'Heroine': 4,
+    'Goddess': 7,
+    'Sprint Go-Getter': 2,
+    'Sprint Speedster': 4,
+    'Mile a Minute': 6,
+    'Kicking Up Dust': 3,
+    'Dirt Sprinter': 2,
+    'Dirt Dancer': 3,
+    'Turf Tussler': 4,
+    // Compound (Stunning/Lady + extras)
+    'Incredible': 4,
+    'Phenomenal': 5,
+    'Legendary': 9
+  };
+  return map[epithetName] != null ? map[epithetName] : null;
+}
+
+// Returns {current, required} for an epithet given the scheduled races, or
+// null if the epithet has no meaningful count semantics. "current" counts
+// the scheduled races matching the epithet's contributing-race predicate.
+function epithetProgress(epithetName, selectedRaces) {
+  const required = epithetRequiredCount(epithetName);
+  if (required == null) return null;
+  // Build a predicate by treating this epithet as "completed" so the predicate
+  // generator emits its matching function (it gates on completion otherwise).
+  const preds = epithetRacePredicates([epithetName]);
+  const pred = preds[epithetName];
+  if (!pred) return { current: 0, required };
+  let current = 0;
+  for (const r of selectedRaces || []) if (pred(r)) current += 1;
+  return { current, required };
 }
 
 // For each completed epithet, return the predicate that matches contributing races.
@@ -1249,11 +1317,34 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   const quadPenaltyTotal = settings.four_race_penalty_weight * quadPenaltyCount;
   const totalValue = weightedRaceValueNet + weightedEpithetValueTotal - triplePenaltyTotal - quadPenaltyTotal;
 
+  // Progress fraction (current/required) for each completed epithet, so the UI
+  // can show surplus on threshold-based epithets and completion ratio on the
+  // all-of binary ones.
+  const epithetProgressMap = {};
+  for (const name of solvedEpithets) {
+    const p = epithetProgress(name, selectedRaces);
+    if (p) epithetProgressMap[name] = p;
+  }
+  // In-progress epithets: any with at least one contributing race but not yet
+  // completed. Useful for showing the user how close they are to bonus rewards.
+  const solvedSet = new Set(solvedEpithets);
+  const inProgressEpithets = [];
+  for (const e of epithets) {
+    if (solvedSet.has(e.name)) continue;
+    const p = epithetProgress(e.name, selectedRaces);
+    if (p && p.current > 0 && p.current < p.required) {
+      epithetProgressMap[e.name] = p;
+      inProgressEpithets.push(e.name);
+    }
+  }
+
   return {
     status,
     message: '',
     schedule_rows: scheduleRows,
     epithets: solvedEpithets,
+    epithets_in_progress: inProgressEpithets,
+    epithet_progress: epithetProgressMap,
     selected_choices: scheduleRows.map(row => row.selected),
     total_value: Number(totalValue.toFixed(2)),
     weighted_race_value: Number(weightedRaceValueGross.toFixed(2)),
@@ -1341,22 +1432,36 @@ function allDropdownChoices(windows, settings) {
   const choiceMap = {};
   const rb = settings ? Math.max(0, settings.race_bonus_pct || 0) / 100 : 0;
   const fanMult = settings ? 1 + Math.max(0, settings.fan_bonus_pct || 0) / 100 : 1;
+  const showOver = Boolean(settings && settings.show_over_distance_races);
+  const maxDist = settings ? Number(settings.max_distance || 0) : 0;
   for (const w of windows) {
+    // Display eligibility: same as solver eligibility (aptitudes, OP, threshold)
+    // but optionally relaxed on max_distance so the user can see / pick races
+    // they ran in-game that the solver wouldn't normally recommend.
     const eligible = settings
-      ? w.races.filter(r => raceIsEligible(r, settings))
+      ? w.races.filter(r => {
+          if (OP_GRADES.has(r.grade) && !settings.include_op) return false;
+          if (!showOver && maxDist > 0 && Number(r.length) > maxDist) return false;
+          const threshold = RANK_VALUE[settings.threshold];
+          const apt = settings.aptitudes;
+          return RANK_VALUE[apt[r.distance]] >= threshold && RANK_VALUE[apt[r.surface]] >= threshold;
+        })
       : w.races;
     const raceChoices = eligible.map(r => {
       const base = BASE_REWARD[r.grade] || { stats: 0, sp: 0, fans: 0 };
       const baseFans = r.fans != null ? r.fans : (base.fans || 0);
+      const isOverDistance = maxDist > 0 && Number(r.length) > maxDist;
       return {
         name: r.name,
         grade: r.grade,
         distance: r.distance,
         surface: r.surface,
         track: r.track,
+        length: r.length,
         stats: Math.floor(base.stats * (1 + rb)),
         sp: Math.floor(base.sp * (1 + rb)),
-        fans: Math.floor(baseFans * fanMult)
+        fans: Math.floor(baseFans * fanMult),
+        over_distance: isOverDistance
       };
     });
     choiceMap[w.index] = raceChoices;
@@ -1376,7 +1481,25 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
       condition_text: e.condition_text,
       reward_kind: e.reward_kind,
       amount: e.amount,
-      weighted_value: Number(epithetObjectiveValue(name, result.settings, data).toFixed(2))
+      weighted_value: Number(epithetObjectiveValue(name, result.settings, data).toFixed(2)),
+      progress: (result.epithet_progress && result.epithet_progress[name]) || null,
+      status: 'completed'
+    };
+  });
+  // In-progress epithets: contributing races scheduled but not enough to complete.
+  // Same shape as acquired but with status='in_progress' and weighted_value=0
+  // (they haven't paid out yet).
+  const inProgress = (result.epithets_in_progress || []).map(name => {
+    const e = data.epithetByName[name];
+    return {
+      name,
+      reward_text: e.reward_text,
+      condition_text: e.condition_text,
+      reward_kind: e.reward_kind,
+      amount: e.amount,
+      weighted_value: 0,
+      progress: (result.epithet_progress && result.epithet_progress[name]) || null,
+      status: 'in_progress'
     };
   });
 
@@ -1416,6 +1539,7 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
     },
     windows: windowsPayload,
     epithets: acquired,
+    epithets_in_progress: inProgress,
     manual_locks: locks,
     current_selected: selectedChoices,
     presets: PRESETS,
